@@ -4,6 +4,9 @@
 // See docs/GOVERNANCE.md invariants: argv-only git, cwd pinned to the repo root.
 
 import type { RPCSchema } from "electrobun/main";
+import type { DiffResult } from "../bun/git/diff";
+import type { LogCommit } from "../bun/git/log";
+import type { GitStatus } from "../bun/git/status-parser";
 
 export interface RepoInfo {
 	root: string;
@@ -80,6 +83,20 @@ export type PlatformRPCSchema = {
 			watchStop: { params: { watchId: number }; response: { ok: boolean } };
 			runGitStart: { params: RpcRunStartParams; response: { runId: number } };
 			runGitAbort: { params: { runId: number }; response: { ok: boolean } };
+			// GitAdapter read paths (U2). ok=false carries a user-facing error.
+			gitStatus: {
+				params: { root: string };
+				response: { ok: boolean; status?: GitStatus; error?: string };
+			};
+			gitDiff: {
+				params: { root: string; from?: string; to?: string; staged?: boolean };
+				response: { ok: boolean; result?: DiffResult; error?: string };
+			};
+			gitLogStart: {
+				params: { root: string; limit?: number; skip?: number; range?: string };
+				response: { logId: number };
+			};
+			gitLogAbort: { params: { logId: number }; response: { ok: boolean } };
 		};
 		messages: {
 			/** Webview → main: result payload of the SMOKE self-test (SMOKE=1). */
@@ -87,6 +104,7 @@ export type PlatformRPCSchema = {
 		};
 	}>;
 	webview: RPCSchema<{
+		// biome-ignore lint/complexity/noBannedTypes: empty side = answers no requests (upstream-idiomatic)
 		requests: {};
 		messages: {
 			fsEvents: { watchId: number; batch: FsEventBatch };
@@ -100,6 +118,8 @@ export type PlatformRPCSchema = {
 			};
 			/** Main → webview (SMOKE=1 only): run the platform self-test against root. */
 			selfTestRun: { root: string };
+			gitLogCommit: { logId: number; commit: LogCommit };
+			gitLogDone: { logId: number; ok: boolean; count: number; error?: string };
 		};
 	}>;
 };
