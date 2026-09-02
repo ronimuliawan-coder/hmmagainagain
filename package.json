@@ -1,0 +1,23 @@
+{
+	"name": "hmmagainagain",
+	"version": "0.0.1",
+	"type": "module",
+	"description": "Lightweight cross-platform desktop git client with diffshub-grade diff/tree UX",
+	"scripts": {
+		"typecheck": "tsc --noEmit",
+		"lint": "biome check .",
+		"format": "biome format --write .",
+		"test": "bun test",
+		"check": "bun run typecheck && bun run lint && bun run test",
+		"install:deps": "hutch install",
+		"dev": "hutch run dev",
+		"build": "hutch run build"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.0.0",
+		"@types/bun": "latest",
+		"concurrently": "^9.1.0",
+		"typescript": "^5.7.2",
+		"vite": "^6.0.3"
+	}
+}
