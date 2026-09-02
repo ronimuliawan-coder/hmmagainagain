@@ -98,6 +98,8 @@ export type PlatformRPCSchema = {
 				signal: string | null;
 				stderr: string;
 			};
+			/** Main → webview (SMOKE=1 only): run the platform self-test against root. */
+			selfTestRun: { root: string };
 		};
 	}>;
 };

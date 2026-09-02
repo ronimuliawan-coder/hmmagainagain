@@ -55,8 +55,8 @@ A target-state document never overrides a still-active production safeguard.
 | Unit | Linear | Scope | Status |
 |---|---|---|---|
 | U0 | — (pre-ledger, recorded in Evidence Log) | Scaffold & toolchain proof | **Done** (2026-09-03) |
-| U0.5 | [RON-293](https://linear.app/rons-space/issue/RON-293) | Governance alignment to golden standard | **In progress** |
-| U1 | [RON-294](https://linear.app/rons-space/issue/RON-294) | Platform adapter & typed RPC | Pending |
+| U0.5 | [RON-293](https://linear.app/rons-space/issue/RON-293) | Governance alignment to golden standard | **Done** (2026-09-03) |
+| U1 | [RON-294](https://linear.app/rons-space/issue/RON-294) | Platform adapter & typed RPC | **In progress** |
 | U2 | [RON-295](https://linear.app/rons-space/issue/RON-295) | GitAdapter read paths | Pending |
 | U3 | [RON-296](https://linear.app/rons-space/issue/RON-296) | UI shell: repo picker, tree, status | Pending |
 | U4 | [RON-297](https://linear.app/rons-space/issue/RON-297) | Diff view (CodeView + worker pool) | Pending |
