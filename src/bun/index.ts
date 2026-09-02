@@ -6,12 +6,16 @@
 
 import { BrowserView, BrowserWindow, Updater } from "electrobun/main";
 import type { FsEventBatch, PlatformRPCSchema } from "../shared/platform";
+import { createGitAdapter } from "./git-adapter";
 import { createBunPlatform } from "./platform-bun";
 
 const DEV_SERVER_PORT = 5173;
 const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}`;
 
 const platform = createBunPlatform();
+const git = createGitAdapter();
+let logSeq = 0;
+const logRuns = new Map<number, AbortController>();
 
 let mainWindow: BrowserWindow | null = null;
 let watchSeq = 0;
@@ -87,6 +91,51 @@ const rpc = BrowserView.defineRPC<PlatformRPCSchema>({
 			},
 			runGitAbort: ({ runId }) => {
 				runs.get(runId)?.abort();
+				return { ok: true };
+			},
+			gitStatus: ({ root }) => {
+				try {
+					// Adapter throws GitError on failure; bridge it into ok/error.
+					return git
+						.status(root)
+						.then((status) => ({ ok: true as const, status }));
+				} catch (error) {
+					return Promise.resolve({ ok: false as const, error: String(error) });
+				}
+			},
+			gitDiff: ({ root, from, to, staged }) => {
+				try {
+					return git
+						.diff(root, { from, to, staged })
+						.then((result) => ({ ok: true as const, result }));
+				} catch (error) {
+					return Promise.resolve({ ok: false as const, error: String(error) });
+				}
+			},
+			gitLogStart: ({ root, limit, skip, range }) => {
+				const logId = ++logSeq;
+				const controller = new AbortController();
+				logRuns.set(logId, controller);
+				void git
+					.feedLog(
+						root,
+						(commit) => send("gitLogCommit", { logId, commit }),
+						{ limit, skip, range },
+						{ signal: controller.signal },
+					)
+					.then(({ count }) => send("gitLogDone", { logId, ok: true, count }))
+					.catch((error) =>
+						send("gitLogDone", {
+							logId,
+							ok: false,
+							count: 0,
+							error: String(error),
+						}),
+					);
+				return { logId };
+			},
+			gitLogAbort: ({ logId }) => {
+				logRuns.get(logId)?.abort();
 				return { ok: true };
 			},
 		},

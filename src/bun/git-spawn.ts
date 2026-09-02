@@ -2,7 +2,9 @@
 // Invariants (docs/GOVERNANCE.md): argv arrays only (never a shell), cwd pinned
 // to the opened repository root, verbatim stderr, abort kills the child.
 
+import type { Subprocess } from "bun";
 import type { GitRunOptions, GitRunResult } from "../shared/platform";
+import { GitError } from "./git/git-error";
 
 export function assertSafeArgs(args: string[]): void {
 	for (const arg of args) {
@@ -12,18 +14,31 @@ export function assertSafeArgs(args: string[]): void {
 	}
 }
 
+export interface SpawnGitOptions extends GitRunOptions {
+	/** Extra environment for the child (fixtures use it for deterministic
+	 * author/date). Values merge over the inherited process env. */
+	env?: Record<string, string>;
+}
+
 export async function spawnGit(
 	root: string,
 	args: string[],
-	opts?: GitRunOptions,
+	opts?: SpawnGitOptions,
 ): Promise<GitRunResult> {
 	assertSafeArgs(args);
-	const proc = Bun.spawn(["git", ...args], {
-		cwd: root,
-		stdout: "pipe",
-		stderr: "pipe",
-		stdin: "ignore",
-	});
+	let proc: Subprocess<"ignore", "pipe", "pipe">;
+	try {
+		proc = Bun.spawn(["git", ...args], {
+			cwd: root,
+			stdout: "pipe",
+			stderr: "pipe",
+			stdin: "ignore",
+			env: opts?.env ? { ...process.env, ...opts.env } : undefined,
+		});
+	} catch (error) {
+		// Missing git binary or a cwd that does not exist surface as ENOENT here.
+		throw new GitError(`failed to spawn git: ${String(error)}`, "", null);
+	}
 
 	// Wire abort → SIGTERM manually (instead of spawn's `signal` option) so the
 	// reported outcome distinguishes killed runs from completed ones.
