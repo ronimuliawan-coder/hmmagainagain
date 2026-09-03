@@ -62,6 +62,10 @@ export interface Platform {
 		root: string,
 		onEvents: (batch: FsEventBatch) => void,
 	): Promise<{ stop: () => Promise<void> }>;
+	/** Porcelain-v2 status (branch + entries). Throws on non-repositories. */
+	gitStatus(root: string): Promise<GitStatus>;
+	/** Sorted worktree file list (tracked + untracked, ignored excluded). */
+	gitWorktreePaths(root: string): Promise<string[]>;
 }
 
 // ---- RPC transport schema (Electrobun typed RPC, used by the webview client) ----
@@ -97,6 +101,10 @@ export type PlatformRPCSchema = {
 				response: { logId: number };
 			};
 			gitLogAbort: { params: { logId: number }; response: { ok: boolean } };
+			gitWorktreePaths: {
+				params: { root: string };
+				response: { ok: boolean; paths?: string[]; error?: string };
+			};
 		};
 		messages: {
 			/** Webview → main: result payload of the SMOKE self-test (SMOKE=1). */
@@ -123,3 +131,9 @@ export type PlatformRPCSchema = {
 		};
 	}>;
 };
+
+export type {
+	GitBranchInfo,
+	GitStatus,
+	StatusEntry,
+} from "../bun/git/status-parser";

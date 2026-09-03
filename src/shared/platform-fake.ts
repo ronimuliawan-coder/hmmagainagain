@@ -5,6 +5,7 @@
 import type {
 	FsEventBatch,
 	GitRunResult,
+	GitStatus,
 	Platform,
 	RepoInfo,
 } from "./platform";
@@ -108,6 +109,40 @@ export function buildFakeFixture() {
 					opts?.onStderr?.(new TextEncoder().encode(result.stderr));
 					return result;
 				});
+		},
+		gitStatus: (root) => {
+			if (root !== FAKE_REPO) {
+				return Promise.reject(new Error(`not a git repository: ${root}`));
+			}
+			const status: GitStatus = {
+				branch: {
+					oid: "f4k3h34d00000000000000000000000000000001",
+					head: "main",
+				},
+				entries: [
+					{
+						path: "hello.txt",
+						indexStatus: "M",
+						worktreeStatus: ".",
+						origin: "changed",
+					},
+					{
+						path: "untracked file.txt",
+						indexStatus: "?",
+						worktreeStatus: "?",
+						origin: "untracked",
+					},
+				],
+			};
+			return Promise.resolve(status);
+		},
+		gitWorktreePaths: (root) => {
+			if (root !== FAKE_REPO) {
+				return Promise.reject(new Error(`not a git repository: ${root}`));
+			}
+			return Promise.resolve(
+				["hello.txt", "src/nested.txt", "untracked file.txt"].sort(),
+			);
 		},
 		watchRepo: (root, onEvents) => {
 			if (root !== FAKE_REPO) {

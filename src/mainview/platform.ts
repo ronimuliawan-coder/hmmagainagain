@@ -83,30 +83,6 @@ function attachRun(runId: number, state: RunState): void {
 let notifySelfTestResult: (payload: { ok: boolean; detail: string }) => void =
 	() => {};
 
-async function runSelfTest(root: string): Promise<void> {
-	try {
-		const platform = getPlatform();
-		const info = await platform.readRepo(root);
-		let chunkCount = 0;
-		let firstLine = "";
-		const run = await platform.runGit(root, ["log", "--oneline", "-3"], {
-			onStdout: (chunk) => {
-				chunkCount += 1;
-				if (!firstLine) {
-					firstLine = new TextDecoder().decode(chunk).split("\n")[0];
-				}
-			},
-		});
-		const watcher = await platform.watchRepo(root, () => {});
-		await watcher.stop();
-		const ok = run.code === 0 && chunkCount > 0;
-		const detail = `branch=${info.branch} head=${info.head.slice(0, 7)} logChunks=${chunkCount} exit=${run.code} first=${firstLine}`;
-		notifySelfTestResult({ ok, detail });
-	} catch (error) {
-		notifySelfTestResult({ ok: false, detail: String(error) });
-	}
-}
-
 type RpcInstance = ReturnType<
 	typeof Electrobun.Electroview.defineRPC<PlatformRPCSchema>
 >;
@@ -153,7 +129,11 @@ function ensureRpc(): RpcInstance {
 					});
 				},
 				selfTestRun: ({ root }) => {
-					void runSelfTest(root);
+					// The self-test itself is DOM-driven and lives in main.ts; the
+					// message bridge hands off via the window event it listens for.
+					window.dispatchEvent(
+						new CustomEvent("hmmagainagain:self-test", { detail: { root } }),
+					);
 				},
 			},
 		},
@@ -204,7 +184,28 @@ function createRpcPlatform(): Platform {
 					},
 				};
 			})(),
+
+		gitStatus: (root: string) =>
+			rpc.request.gitStatus({ root }).then((r) => {
+				if (!r.ok || !r.status) throw new Error(r.error ?? "gitStatus failed");
+				return r.status;
+			}),
+
+		gitWorktreePaths: (root: string) =>
+			rpc.request.gitWorktreePaths({ root }).then((r) => {
+				if (!r.ok || !r.paths)
+					throw new Error(r.error ?? "gitWorktreePaths failed");
+				return r.paths;
+			}),
 	};
+}
+
+/** SMOKE=1: main.ts listens for this event and reports via sendSelfTestResult. */
+export function sendSelfTestResult(payload: {
+	ok: boolean;
+	detail: string;
+}): void {
+	notifySelfTestResult(payload);
 }
 
 const rpcPlatform = isElectrobun() ? createRpcPlatform() : null;
