@@ -138,6 +138,15 @@ const rpc = BrowserView.defineRPC<PlatformRPCSchema>({
 				logRuns.get(logId)?.abort();
 				return { ok: true };
 			},
+			gitWorktreePaths: ({ root }) => {
+				try {
+					return git
+						.worktreePaths(root)
+						.then((paths) => ({ ok: true as const, paths }));
+				} catch (error) {
+					return Promise.resolve({ ok: false as const, error: String(error) });
+				}
+			},
 		},
 		messages: {
 			selfTestResult: ({ ok, detail }) => {

@@ -23,6 +23,10 @@ export interface GitAdapter {
 		opts?: GitRunOptions,
 	): Promise<{ count: number }>;
 	diff(root: string, options?: DiffOptions): Promise<DiffResult>;
+	/** Every file in the worktree (tracked + untracked, ignored excluded),
+	 * sorted — resetPaths input for U3. preparePresortedFileTreeInput remains
+	 * available if large-repo profiling (U8) shows prep cost matters. */
+	worktreePaths(root: string): Promise<string[]>;
 	openCatFile(root: string): CatFileSession;
 }
 
@@ -48,12 +52,35 @@ async function status(root: string): Promise<GitStatus> {
 	return parseStatusV2(raw);
 }
 
+async function worktreePaths(root: string): Promise<string[]> {
+	const chunks: Uint8Array[] = [];
+	const result = await spawnGit(
+		root,
+		["ls-files", "-co", "--exclude-standard", "-z"],
+		{ onStdout: (c) => chunks.push(c), env: { GIT_OPTIONAL_LOCKS: "0" } },
+	);
+	if (result.code !== 0) {
+		throw new GitError(
+			`git ls-files failed in ${root}`,
+			result.stderr,
+			result.code,
+		);
+	}
+	return chunks
+		.map((c) => new TextDecoder().decode(c))
+		.join("")
+		.split("\0")
+		.filter((p) => p.length > 0)
+		.sort();
+}
+
 export function createGitAdapter(): GitAdapter {
 	return {
 		status,
 		log,
 		feedLog,
 		diff,
+		worktreePaths,
 		openCatFile: (root: string) => CatFileSession.start(root),
 	};
 }

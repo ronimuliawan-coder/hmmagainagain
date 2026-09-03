@@ -10,9 +10,11 @@ import type {
 	Platform,
 	RepoInfo,
 } from "../shared/platform";
+import { createGitAdapter } from "./git-adapter";
 import { spawnGit } from "./git-spawn";
 
 const WATCH_DEBOUNCE_MS = 100;
+const git = createGitAdapter();
 
 async function gitOut(
 	root: string,
@@ -51,6 +53,14 @@ export function createBunPlatform(): Platform {
 			opts?: GitRunOptions,
 		): Promise<GitRunResult> {
 			return spawnGit(root, args, opts);
+		},
+
+		gitStatus(root: string) {
+			return git.status(root);
+		},
+
+		gitWorktreePaths(root: string) {
+			return git.worktreePaths(root);
 		},
 
 		watchRepo(root: string, onEvents: (batch: FsEventBatch) => void) {

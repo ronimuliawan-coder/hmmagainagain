@@ -6,7 +6,23 @@
     <title>hmmagainagain</title>
   </head>
   <body>
-    <div id="app"></div>
+    <header id="topbar">
+      <strong>hmmagainagain</strong>
+      <input id="repo-path" placeholder="/path/to/repository" list="recents" />
+      <datalist id="recent-list"></datalist>
+      <button id="open-btn" type="button">Open</button>
+      <span id="repo-info">no repository open</span>
+    </header>
+    <main id="shell">
+      <section id="tree-pane">
+        <h2>Worktree</h2>
+        <div id="tree-container"></div>
+      </section>
+      <section id="status-pane">
+        <h2>Changed files</h2>
+        <ul id="status-list"></ul>
+      </section>
+    </main>
     <script type="module" src="/main.ts"></script>
   </body>
 </html>
