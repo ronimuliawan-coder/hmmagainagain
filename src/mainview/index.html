@@ -51,6 +51,17 @@
         </div>
         <div id="diff-container"></div>
       </section>
+      <section id="history-pane">
+        <h2>Branches</h2>
+        <select id="branch-select" aria-label="current branch"></select>
+        <div id="branch-create-row">
+          <input id="branch-name" placeholder="new-branch-name" />
+          <button type="button" id="branch-create-btn">Create</button>
+        </div>
+        <h2>History</h2>
+        <ul id="history-list"></ul>
+        <button type="button" id="older-btn" hidden>Older</button>
+      </section>
     </main>
     <script type="module" src="/main.ts"></script>
   </body>

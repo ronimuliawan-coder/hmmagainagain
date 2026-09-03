@@ -6,10 +6,12 @@
 
 import Electrobun from "electrobun/view";
 import type {
+	BranchInfo,
 	FsEventBatch,
 	GitDiffOptions,
 	GitRunOptions,
 	GitRunResult,
+	LogCommit,
 	Platform,
 	PlatformRPCSchema,
 	RepoInfo,
@@ -47,6 +49,25 @@ const pendingFsEvents = new Map<number, FsEventBatch[]>();
 const runs = new Map<number, RunState>();
 const pendingChunks = new Map<number, ChunkMsg[]>();
 const pendingExits = new Map<number, ExitMsg>();
+const logListeners = new Map<
+	number,
+	{
+		onCommit: (commit: LogCommit) => void;
+		resolve: (result: { count: number }) => void;
+		reject: (error: Error) => void;
+	}
+>();
+const pendingLogCommits = new Map<number, LogCommit[]>();
+const logDone = new Map<
+	number,
+	{
+		ok: boolean;
+		count: number;
+		error?: string;
+		resolve: (r: { count: number }) => void;
+		reject: (e: Error) => void;
+	}
+>();
 
 function deliver(
 	run: RunState,
@@ -129,12 +150,31 @@ function ensureRpc(): RpcInstance {
 						stderr: msg.stderr || run.stderr,
 					});
 				},
-				selfTestRun: ({ root, stage }) => {
+				gitLogCommit: (msg) => {
+					const listener = logListeners.get(msg.logId);
+					if (listener) {
+						listener.onCommit(msg.commit);
+					} else {
+						const list = pendingLogCommits.get(msg.logId) ?? [];
+						list.push(msg.commit);
+						pendingLogCommits.set(msg.logId, list);
+					}
+				},
+				gitLogDone: (msg) => {
+					const pending = logDone.get(msg.logId);
+					if (pending) {
+						logDone.delete(msg.logId);
+						logListeners.delete(msg.logId);
+						if (msg.ok) pending.resolve({ count: msg.count });
+						else pending.reject(new Error(msg.error ?? "git log failed"));
+					}
+				},
+				selfTestRun: ({ root, stage, branch }) => {
 					// The self-test itself is DOM-driven and lives in main.ts; the
 					// message bridge hands off via the window event it listens for.
 					window.dispatchEvent(
 						new CustomEvent("hmmagainagain:self-test", {
-							detail: { root, stage },
+							detail: { root, stage, branch },
 						}),
 					);
 				},
@@ -207,6 +247,49 @@ function createRpcPlatform(): Platform {
 				return r.paths;
 			}),
 
+		gitLog: (root, options, onCommit) =>
+			new Promise<{ count: number }>((resolve, reject) => {
+				void (async () => {
+					const { logId } = await rpc.request.gitLogStart({
+						root,
+						limit: options?.limit,
+						skip: options?.skip,
+						range: options?.range,
+					});
+					// Attach after the start response; early commits buffer by id.
+					const early = pendingLogCommits.get(logId);
+					if (early) {
+						for (const commit of early) onCommit(commit);
+						pendingLogCommits.delete(logId);
+					}
+					logListeners.set(logId, { onCommit, resolve, reject });
+					const done = logDone.get(logId);
+					if (done) {
+						logDone.delete(logId);
+						logListeners.delete(logId);
+						if (done.ok) resolve({ count: done.count });
+						else reject(new Error(done.error ?? "git log failed"));
+					}
+				})();
+			}),
+
+		gitBranches: (root: string) =>
+			rpc.request.gitBranches({ root }).then((r) => {
+				if (!r.ok || !r.branches)
+					throw new Error(r.error ?? "gitBranches failed");
+				return r.branches;
+			}),
+
+		gitCreateBranch: (root: string, name: string, switchTo?: boolean) =>
+			rpc.request.gitCreateBranch({ root, name, switchTo }).then((r) => {
+				if (!r.ok) throw new Error(r.error ?? "gitCreateBranch failed");
+			}),
+
+		gitSwitchBranch: (root: string, name: string) =>
+			rpc.request.gitSwitchBranch({ root, name }).then((r) => {
+				if (!r.ok) throw new Error(r.error ?? "gitSwitchBranch failed");
+			}),
+
 		stagePaths: (root: string, paths: string[]) =>
 			rpc.request.stagePaths({ root, paths }).then((r) => {
 				if (!r.ok) throw new Error(r.error ?? "stagePaths failed");
@@ -237,7 +320,22 @@ export function sendSelfTestResult(payload: {
 	notifySelfTestResult(payload);
 }
 
-const rpcPlatform = isElectrobun() ? createRpcPlatform() : null;
+let platformLoadError: string | null = null;
+const rpcPlatform = (() => {
+	try {
+		return isElectrobun() ? createRpcPlatform() : null;
+	} catch (error) {
+		// A failed RPC setup must not die silently — surface it via the
+		// SMOKE self-test and the fake fallback.
+		platformLoadError = String(error);
+		return null;
+	}
+})();
+
+/** Non-null when the Electrobun RPC platform failed to initialize. */
+export function getPlatformLoadError(): string | null {
+	return platformLoadError;
+}
 
 /** The single Platform instance the UI consumes; fake when not in Electrobun. */
 export function getPlatform(): Platform {
