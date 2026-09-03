@@ -41,7 +41,10 @@ const rpc = BrowserView.defineRPC<PlatformRPCSchema>({
 	maxRequestTime: 30_000,
 	handlers: {
 		requests: {
-			readRepo: ({ root }) => platform.readRepo(root),
+			readRepo: ({ root }) => {
+				console.log("[DBG] readRepo handler reached");
+				return platform.readRepo(root);
+			},
 			watchStart: ({ root }) => {
 				const watchId = ++watchSeq;
 				void platform
@@ -94,6 +97,7 @@ const rpc = BrowserView.defineRPC<PlatformRPCSchema>({
 				return { ok: true };
 			},
 			gitStatus: ({ root }) => {
+				console.log("[DBG] gitStatus handler reached");
 				try {
 					// Adapter throws GitError on failure; bridge it into ok/error.
 					return git
@@ -157,6 +161,33 @@ const rpc = BrowserView.defineRPC<PlatformRPCSchema>({
 					return git
 						.worktreePaths(root)
 						.then((paths) => ({ ok: true as const, paths }));
+				} catch (error) {
+					return Promise.resolve({ ok: false as const, error: String(error) });
+				}
+			},
+			gitBranches: ({ root }) => {
+				try {
+					return git
+						.branches(root)
+						.then((branches) => ({ ok: true as const, branches }));
+				} catch (error) {
+					return Promise.resolve({ ok: false as const, error: String(error) });
+				}
+			},
+			gitCreateBranch: ({ root, name, switchTo }) => {
+				try {
+					return git
+						.createBranch(root, name, { switchTo })
+						.then(() => ({ ok: true as const }));
+				} catch (error) {
+					return Promise.resolve({ ok: false as const, error: String(error) });
+				}
+			},
+			gitSwitchBranch: ({ root, name }) => {
+				try {
+					return git
+						.switchBranch(root, name)
+						.then(() => ({ ok: true as const }));
 				} catch (error) {
 					return Promise.resolve({ ok: false as const, error: String(error) });
 				}
@@ -253,6 +284,7 @@ if (process.env.SMOKE === "1") {
 			// SMOKE_STAGE=1 adds the staging/commit flow — ONLY ever point
 			// SMOKE_ROOT at a throwaway fixture when staging/committing.
 			stage: process.env.SMOKE_STAGE === "1",
+			branch: process.env.SMOKE_BRANCH === "1",
 		});
 	}, 5000);
 }

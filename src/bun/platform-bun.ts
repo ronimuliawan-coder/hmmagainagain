@@ -68,6 +68,22 @@ export function createBunPlatform(): Platform {
 			return git.worktreePaths(root);
 		},
 
+		gitLog(root, options, onCommit) {
+			return git.feedLog(root, onCommit, options);
+		},
+
+		gitBranches(root) {
+			return git.branches(root);
+		},
+
+		gitCreateBranch(root, name, switchTo) {
+			return git.createBranch(root, name, { switchTo });
+		},
+
+		gitSwitchBranch(root, name) {
+			return git.switchBranch(root, name);
+		},
+
 		stagePaths(root: string, paths: string[]) {
 			return git.stagePaths(root, paths);
 		},

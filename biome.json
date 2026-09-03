@@ -5,6 +5,7 @@
 			"**",
 			"!**/.hutch",
 			"!**/.cottontail-tmp",
+			"!**/.agents",
 			"!**/node_modules",
 			"!**/dist",
 			"!**/build",

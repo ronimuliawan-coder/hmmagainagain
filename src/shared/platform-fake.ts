@@ -18,6 +18,7 @@ const TRACKED_FILE = "hello.txt";
 const TRACKED_CONTENT = "hello from the fake fixture\n";
 const LONG_RUN_ARGS = ["log", "--all", "--oneline", "--graph"];
 const LONG_RUN_MARKER = "commit-42-marker";
+let fakeBranch = "main";
 
 // Index simulation for the U5 write paths. hello.txt starts staged (matching
 // the gitDiff fixture); unstaging flips it to a worktree-only modification so
@@ -183,6 +184,60 @@ export function buildFakeFixture() {
 			return Promise.resolve(
 				["hello.txt", "src/nested.txt", "untracked file.txt"].sort(),
 			);
+		},
+		gitLog: (root, options, onCommit) => {
+			if (root !== FAKE_REPO) {
+				return Promise.reject(new Error(`not a git repository: ${root}`));
+			}
+			const commits = [
+				{
+					oid: "f4k3c0mm1t000000000000000000000000000002",
+					shortOid: "f4k3c02",
+					authorName: "Fake",
+					authorEmail: "fake@fixture.test",
+					date: "2026-01-02T00:00:00Z",
+					subject: "fake: second commit",
+					refs: "HEAD -> main",
+				},
+				{
+					oid: "f4k3c0mm1t000000000000000000000000000001",
+					shortOid: "f4k3c01",
+					authorName: "Fake",
+					authorEmail: "fake@fixture.test",
+					date: "2026-01-01T00:00:00Z",
+					subject: "fake: first commit",
+					refs: "",
+				},
+			];
+			let delivered = 0;
+			for (const commit of commits) {
+				if ((options.skip ?? 0) > delivered) continue;
+				delivered += 1;
+				onCommit(commit);
+			}
+			return Promise.resolve({ count: delivered });
+		},
+		gitBranches: (root) => {
+			if (root !== FAKE_REPO) {
+				return Promise.reject(new Error(`not a git repository: ${root}`));
+			}
+			return Promise.resolve([
+				{ name: fakeBranch, oid: "f4k3c02", current: true },
+			]);
+		},
+		gitCreateBranch: (root, name, switchTo) => {
+			if (root !== FAKE_REPO) {
+				return Promise.reject(new Error(`not a git repository: ${root}`));
+			}
+			if (switchTo) fakeBranch = name;
+			return Promise.resolve();
+		},
+		gitSwitchBranch: (root, name) => {
+			if (root !== FAKE_REPO) {
+				return Promise.reject(new Error(`not a git repository: ${root}`));
+			}
+			fakeBranch = name;
+			return Promise.resolve();
 		},
 		// ---- Write paths (U5): minimal index simulation for browser dev ----
 		stagePaths: (root, paths) => {
