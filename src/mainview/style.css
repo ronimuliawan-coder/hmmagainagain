@@ -210,18 +210,75 @@ body {
 
 #shell {
 	display: grid;
-	grid-template-columns: minmax(260px, 1fr) 1fr;
+	grid-template-columns: minmax(240px, 0.8fr) minmax(240px, 0.8fr) 2fr;
 	height: calc(100vh - 49px);
 }
 
 #tree-pane,
-#status-pane {
+#status-pane,
+#diff-pane {
 	overflow: auto;
 	padding: 8px 12px;
 }
 
 #tree-pane {
 	border-right: 1px solid #2a2e34;
+}
+
+#diff-pane {
+	display: flex;
+	flex-direction: column;
+	border-left: 1px solid #2a2e34;
+	padding: 0;
+}
+
+#diff-toolbar {
+	display: flex;
+	gap: 6px;
+	align-items: center;
+	padding: 6px 10px;
+	background: #1c1f24;
+	border-bottom: 1px solid #2a2e34;
+	font-size: 0.8rem;
+}
+
+#diff-toolbar button {
+	padding: 3px 10px;
+	font-size: 0.78rem;
+	border-radius: 5px;
+	border: 1px solid #2a2e34;
+	background: #101215;
+	color: #9aa4ae;
+	cursor: pointer;
+}
+
+#diff-toolbar button.active {
+	color: #e6e6e6;
+	border-color: #61afef;
+}
+
+#diff-toolbar input {
+	width: 90px;
+	padding: 3px 6px;
+	font-size: 0.78rem;
+	border-radius: 5px;
+	border: 1px solid #2a2e34;
+	background: #101215;
+	color: inherit;
+}
+
+#diff-info {
+	margin-left: auto;
+	color: #9aa4ae;
+	font-size: 0.78rem;
+	white-space: nowrap;
+}
+
+#diff-container {
+	flex: 1;
+	min-height: 0;
+	overflow: auto;
+	background: #14161a;
 }
 
 #tree-pane h2,

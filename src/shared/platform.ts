@@ -35,6 +35,13 @@ export interface GitRunResult {
 	stderr: string;
 }
 
+/** Range selection for a worktree diff; empty = index vs worktree. */
+export interface GitDiffOptions {
+	staged?: boolean;
+	from?: string;
+	to?: string;
+}
+
 /**
  * The UI never touches Node/Bun/Electron APIs directly — only this interface.
  * `openRepo` is intentionally absent: Electrobun 2.0.1 ships no native
@@ -64,6 +71,9 @@ export interface Platform {
 	): Promise<{ stop: () => Promise<void> }>;
 	/** Porcelain-v2 status (branch + entries). Throws on non-repositories. */
 	gitStatus(root: string): Promise<GitStatus>;
+	/** Unified patch text + per-file numstat for the requested range.
+	 * Throws on non-repositories. */
+	gitDiff(root: string, options?: GitDiffOptions): Promise<DiffResult>;
 	/** Sorted worktree file list (tracked + untracked, ignored excluded). */
 	gitWorktreePaths(root: string): Promise<string[]>;
 }
@@ -132,6 +142,7 @@ export type PlatformRPCSchema = {
 	}>;
 };
 
+export type { DiffFile, DiffResult } from "../bun/git/diff";
 export type {
 	GitBranchInfo,
 	GitStatus,
