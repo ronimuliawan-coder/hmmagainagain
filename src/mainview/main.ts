@@ -7,6 +7,7 @@ import {
 } from "./diff-view-wrapper";
 import { mountFileTree, type TreeHandle } from "./file-tree-wrapper";
 import { statusToTreeEntries } from "./git-status-mapping";
+import { buildStagedPatch } from "./patch-surgery";
 import { getPlatform, sendSelfTestResult } from "./platform";
 import { createStore } from "./store";
 
@@ -52,6 +53,11 @@ const diffFromInput = byId<HTMLInputElement>("diff-from");
 const diffToInput = byId<HTMLInputElement>("diff-to");
 const unifiedBtn = byId<HTMLButtonElement>("diff-style-unified");
 const splitBtn = byId<HTMLButtonElement>("diff-style-split");
+const stageSelectedBtn = byId<HTMLButtonElement>("stage-selected-btn");
+const commitMessage = byId<HTMLTextAreaElement>("commit-message");
+const commitBtn = byId<HTMLButtonElement>("commit-btn");
+const stagedCount = byId<HTMLSpanElement>("staged-count");
+const writeError = byId<HTMLPreElement>("write-error");
 
 type DiffMode = "worktree" | "staged" | "head" | "range";
 
@@ -84,6 +90,10 @@ let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 let diffSeq = 0;
 // Stage timings of the last diff load — read by the SMOKE self-test.
 const diffTimings = { fetchMs: 0, parseMs: 0, files: 0 };
+// The patch behind the current diff view + the user's line selection in it —
+// the inputs to hunk staging (patch surgery).
+let lastPatch = "";
+let lastSelection: { path: string; start: number; end: number } | null = null;
 
 function readRecents(): RecentRepos {
 	try {
@@ -133,6 +143,7 @@ function renderStatusList(status: GitStatus): void {
 		const active =
 			entry.worktreeStatus !== "." ? entry.worktreeStatus : entry.indexStatus;
 		item.dataset.path = entry.path;
+		item.dataset.staged = entry.indexStatus !== "." ? "yes" : "no";
 		const letter = document.createElement("span");
 		// CSS classes can't carry raw porcelain letters (?, ., !) — slug them.
 		letter.className = `status-letter status-${statusSlug(active)}`;
@@ -143,7 +154,13 @@ function renderStatusList(status: GitStatus): void {
 			entry.renamedFrom !== undefined
 				? `${entry.renamedFrom} → ${entry.path}`
 				: entry.path;
-		item.append(letter, label);
+		const action = document.createElement("button");
+		action.type = "button";
+		action.className = "status-action";
+		action.textContent = entry.indexStatus !== "." ? "unstage" : "stage";
+		action.dataset.actionPath = entry.path;
+		action.dataset.actionKind = entry.indexStatus !== "." ? "unstage" : "stage";
+		item.append(letter, label, action);
 		statusList.appendChild(item);
 	}
 }
@@ -155,6 +172,13 @@ function render(state: AppState): void {
 		tree?.setGitStatus(statusToTreeEntries(state.status.entries));
 	}
 	if (state.info && state.status) renderRepoInfo(state.info, state.status);
+	if (state.status) {
+		const staged = state.status.entries.filter(
+			(e) => e.indexStatus !== ".",
+		).length;
+		stagedCount.textContent = `${staged} staged`;
+		commitBtn.disabled = staged === 0;
+	}
 	for (const button of rangeButtons) {
 		button.classList.toggle(
 			"active",
@@ -166,6 +190,21 @@ function render(state: AppState): void {
 }
 
 store.subscribe(render);
+
+/** Diff line selection → hunk-staging input (patch surgery). */
+function handleDiffSelection(selection: {
+	id: string;
+	start: number;
+	end: number;
+}): void {
+	const path = selection.id.startsWith("diff:")
+		? selection.id.slice("diff:".length)
+		: null;
+	lastSelection = path
+		? { path, start: selection.start, end: selection.end }
+		: null;
+	stageSelectedBtn.disabled = lastSelection === null;
+}
 
 async function refreshStatus(): Promise<void> {
 	const { root } = store.get();
@@ -191,7 +230,7 @@ function diffOptionsFor(state: AppState): GitDiffOptions {
 async function refreshDiff(): Promise<void> {
 	const state = store.get();
 	if (!state.root) return;
-	if (!diffView) diffView = mountDiffView(diffContainer);
+	if (!diffView) diffView = mountDiffView(diffContainer, handleDiffSelection);
 	const seq = ++diffSeq;
 	try {
 		const t0 = performance.now();
@@ -202,6 +241,9 @@ async function refreshDiff(): Promise<void> {
 		const fetchMs = performance.now() - t0;
 		if (seq !== diffSeq) return; // a newer request superseded this one
 		const t1 = performance.now();
+		lastPatch = result.patch;
+		lastSelection = null;
+		stageSelectedBtn.disabled = true;
 		diffView.setPatch(result.patch);
 		const parseMs = performance.now() - t1;
 		diffTimings.fetchMs = fetchMs;
@@ -240,7 +282,7 @@ async function openRepo(root: string): Promise<string> {
 	]);
 	if (!tree) tree = mountFileTree(treeContainer);
 	tree.setPaths(paths);
-	if (!diffView) diffView = mountDiffView(diffContainer);
+	if (!diffView) diffView = mountDiffView(diffContainer, handleDiffSelection);
 
 	// Watcher-driven refresh: one subscription per open repository.
 	if (watcher) await watcher.stop();
@@ -270,6 +312,26 @@ const setDiffState = (partial: Partial<AppState>): void => {
 	void refreshDiff();
 };
 
+const showWriteError = (error: unknown): void => {
+	writeError.textContent =
+		error instanceof Error ? error.message : String(error);
+};
+
+async function runWriteAction(path: string, unstage: boolean): Promise<void> {
+	const { root } = store.get();
+	if (!root) return;
+	try {
+		if (unstage) await getPlatform().unstagePaths(root, [path]);
+		else await getPlatform().stagePaths(root, [path]);
+		writeError.textContent = "";
+		await refreshStatus();
+		const { diffMode } = store.get();
+		if (diffMode === "worktree" || diffMode === "staged") await refreshDiff();
+	} catch (error) {
+		showWriteError(error);
+	}
+}
+
 for (const button of rangeButtons) {
 	button.addEventListener("click", () => {
 		const mode = button.dataset.diffRange as DiffMode | undefined;
@@ -297,11 +359,57 @@ for (const [button, style] of [
 	});
 }
 
-// Clicking a changed file jumps the diff to that file's item.
+// Clicking a changed file jumps the diff to that file's item; the stage/
+// unstage action button writes the index instead.
 statusList.addEventListener("click", (event) => {
-	const item = (event.target as HTMLElement | null)?.closest("li");
+	const target = event.target as HTMLElement | null;
+	const action = target?.closest<HTMLButtonElement>("[data-action-path]");
+	if (action) {
+		void runWriteAction(
+			action.dataset.actionPath ?? "",
+			action.dataset.actionKind === "unstage",
+		);
+		return;
+	}
+	const item = target?.closest("li");
 	const path = item?.dataset.path;
 	if (path) diffView?.scrollToFile(path);
+});
+
+stageSelectedBtn.addEventListener("click", () => {
+	const { root } = store.get();
+	if (!root || !lastSelection) return;
+	const patch = buildStagedPatch(lastPatch, lastSelection.path, {
+		start: lastSelection.start,
+		end: lastSelection.end,
+	});
+	if (!patch) return;
+	void getPlatform()
+		.applyIndexPatch(root, patch)
+		.then(() => {
+			writeError.textContent = "";
+			return refreshStatus().then(() => refreshDiff());
+		})
+		.catch(showWriteError);
+});
+
+commitBtn.addEventListener("click", () => {
+	const { root } = store.get();
+	if (!root) return;
+	const message = commitMessage.value;
+	if (message.trim().length === 0) {
+		writeError.textContent = "Commit message is empty.";
+		return;
+	}
+	void getPlatform()
+		.commit(root, message)
+		.then(() => {
+			commitMessage.value = "";
+			writeError.textContent = "";
+			// A commit moves HEAD: every diff range can change.
+			return refreshStatus().then(() => refreshDiff());
+		})
+		.catch(showWriteError);
 });
 
 renderRecents();
@@ -346,7 +454,9 @@ function sampleScrollGaps(
 
 // ---- SMOKE=1 self-test (driven by the main process over RPC) ----
 window.addEventListener("hmmagainagain:self-test", (event) => {
-	const root = (event as CustomEvent<{ root: string }>).detail.root;
+	const detail = (event as CustomEvent<{ root: string; stage?: boolean }>)
+		.detail;
+	const root = detail.root;
 	const run = async (): Promise<{ ok: boolean; detail: string }> => {
 		const status = await getPlatform().gitStatus(root);
 		await openRepo(root);
@@ -361,13 +471,41 @@ window.addEventListener("hmmagainagain:self-test", (event) => {
 		// First diff paint, then sample frame gaps while scrolling.
 		await new Promise((resolve) => requestAnimationFrame(resolve));
 		const scroll = await sampleScrollGaps(1500);
+		// SMOKE_STAGE=1: staging/commit flow — fixture repos ONLY.
+		let stageDetail = "stage=off";
+		let stageOk = true;
+		if (detail.stage) {
+			const first = status.entries[0]?.path;
+			if (!first) {
+				stageOk = false;
+				stageDetail = "stage=no-entries";
+			} else {
+				await getPlatform().stagePaths(root, [first]);
+				let st = await getPlatform().gitStatus(root);
+				const stagedOk =
+					(st.entries.find((e) => e.path === first)?.indexStatus ?? ".") !==
+					".";
+				await getPlatform().unstagePaths(root, [first]);
+				st = await getPlatform().gitStatus(root);
+				const unstagedOk =
+					(st.entries.find((e) => e.path === first)?.indexStatus ?? ".") ===
+					".";
+				await getPlatform().stagePaths(root, [first]);
+				await getPlatform().commit(root, "smoke: fixture commit");
+				st = await getPlatform().gitStatus(root);
+				const committedOk = !st.entries.some((e) => e.indexStatus !== ".");
+				stageDetail = `stage staged=${stagedOk} unstaged=${unstagedOk} committed=${committedOk}`;
+				stageOk = stagedOk && unstagedOk && committedOk;
+			}
+		}
 		const domOk =
 			treeRows > 0 &&
 			statusItems > 0 &&
 			store.get().root === root &&
-			(status.entries.length === 0 || diffTimings.files > 0);
-		const detail = `treeRows=${treeRows} statusItems=${statusItems} entries=${status.entries.length} diffFiles=${diffTimings.files} diffTotalMs=${diffTotalMs.toFixed(0)} fetchMs=${diffTimings.fetchMs.toFixed(0)} parseMs=${diffTimings.parseMs.toFixed(0)} scrollMaxGap=${scroll.maxGap.toFixed(1)} scrollP95Gap=${scroll.p95Gap.toFixed(1)}`;
-		return { ok: domOk, detail };
+			(status.entries.length === 0 || diffTimings.files > 0) &&
+			(!detail.stage || stageOk);
+		const detailText = `treeRows=${treeRows} statusItems=${statusItems} entries=${status.entries.length} diffFiles=${diffTimings.files} diffTotalMs=${diffTotalMs.toFixed(0)} fetchMs=${diffTimings.fetchMs.toFixed(0)} parseMs=${diffTimings.parseMs.toFixed(0)} scrollMaxGap=${scroll.maxGap.toFixed(1)} scrollP95Gap=${scroll.p95Gap.toFixed(1)} ${stageDetail}`;
+		return { ok: domOk, detail: detailText };
 	};
 	void run().then(({ ok, detail }) => sendSelfTestResult({ ok, detail }));
 });

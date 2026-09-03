@@ -129,11 +129,13 @@ function ensureRpc(): RpcInstance {
 						stderr: msg.stderr || run.stderr,
 					});
 				},
-				selfTestRun: ({ root }) => {
+				selfTestRun: ({ root, stage }) => {
 					// The self-test itself is DOM-driven and lives in main.ts; the
 					// message bridge hands off via the window event it listens for.
 					window.dispatchEvent(
-						new CustomEvent("hmmagainagain:self-test", { detail: { root } }),
+						new CustomEvent("hmmagainagain:self-test", {
+							detail: { root, stage },
+						}),
 					);
 				},
 			},
@@ -203,6 +205,26 @@ function createRpcPlatform(): Platform {
 				if (!r.ok || !r.paths)
 					throw new Error(r.error ?? "gitWorktreePaths failed");
 				return r.paths;
+			}),
+
+		stagePaths: (root: string, paths: string[]) =>
+			rpc.request.stagePaths({ root, paths }).then((r) => {
+				if (!r.ok) throw new Error(r.error ?? "stagePaths failed");
+			}),
+
+		unstagePaths: (root: string, paths: string[]) =>
+			rpc.request.unstagePaths({ root, paths }).then((r) => {
+				if (!r.ok) throw new Error(r.error ?? "unstagePaths failed");
+			}),
+
+		applyIndexPatch: (root: string, patch: string) =>
+			rpc.request.applyIndexPatch({ root, patch }).then((r) => {
+				if (!r.ok) throw new Error(r.error ?? "applyIndexPatch failed");
+			}),
+
+		commit: (root: string, message: string) =>
+			rpc.request.commit({ root, message }).then((r) => {
+				if (!r.ok) throw new Error(r.error ?? "commit failed");
 			}),
 	};
 }
