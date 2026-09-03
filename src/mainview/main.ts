@@ -1,5 +1,10 @@
 import "./style.css";
-import type { GitDiffOptions, GitStatus, RepoInfo } from "../shared/platform";
+import type {
+	GitDiffOptions,
+	GitStatus,
+	LogCommit,
+	RepoInfo,
+} from "../shared/platform";
 import {
 	type DiffStyle,
 	type DiffViewHandle,
@@ -8,7 +13,11 @@ import {
 import { mountFileTree, type TreeHandle } from "./file-tree-wrapper";
 import { statusToTreeEntries } from "./git-status-mapping";
 import { buildStagedPatch } from "./patch-surgery";
-import { getPlatform, sendSelfTestResult } from "./platform";
+import {
+	getPlatform,
+	getPlatformLoadError,
+	sendSelfTestResult,
+} from "./platform";
 import { createStore } from "./store";
 
 const RECENTS_KEY = "hmmagainagain.recents";
@@ -58,6 +67,11 @@ const commitMessage = byId<HTMLTextAreaElement>("commit-message");
 const commitBtn = byId<HTMLButtonElement>("commit-btn");
 const stagedCount = byId<HTMLSpanElement>("staged-count");
 const writeError = byId<HTMLPreElement>("write-error");
+const historyList = byId<HTMLUListElement>("history-list");
+const branchSelect = byId<HTMLSelectElement>("branch-select");
+const branchName = byId<HTMLInputElement>("branch-name");
+const branchCreateBtn = byId<HTMLButtonElement>("branch-create-btn");
+const olderBtn = byId<HTMLButtonElement>("older-btn");
 
 type DiffMode = "worktree" | "staged" | "head" | "range";
 
@@ -291,6 +305,10 @@ async function openRepo(root: string): Promise<string> {
 	saveRecent(root);
 	store.set({ ...store.get(), root, info, status });
 	void refreshDiff();
+	refreshBranches();
+	historyList.innerHTML = "";
+	historyLoaded = 0;
+	refreshHistory();
 	return `${info.branch} · ${info.head.slice(0, 7)} · ${status.entries.length} change(s)`;
 }
 
@@ -407,12 +425,155 @@ commitBtn.addEventListener("click", () => {
 			commitMessage.value = "";
 			writeError.textContent = "";
 			// A commit moves HEAD: every diff range can change.
+			refreshBranches();
+			historyList.innerHTML = "";
+			historyLoaded = 0;
+			refreshHistory();
 			return refreshStatus().then(() => refreshDiff());
 		})
 		.catch(showWriteError);
 });
 
 renderRecents();
+
+// ---- U6: history pane + branch operations ----
+const HISTORY_PAGE = 50;
+let historyLoaded = 0;
+let selectedCommitOid: string | null = null;
+
+function appendCommitRow(commit: LogCommit): void {
+	const item = document.createElement("li");
+	item.className = "history-row";
+	item.dataset.oid = commit.oid;
+	const short = document.createElement("span");
+	short.className = "history-oid";
+	short.textContent = commit.shortOid;
+	const subject = document.createElement("span");
+	subject.className = "history-subject";
+	subject.textContent =
+		commit.refs.length > 0
+			? `${commit.subject} (${commit.refs})`
+			: commit.subject;
+	item.append(short, subject);
+	item.addEventListener("click", () => viewCommit(commit.oid));
+	historyList.appendChild(item);
+}
+
+/** Streams the next page of history; append=false restarts the list. */
+function refreshHistory(append = false): void {
+	const { root } = store.get();
+	if (!root) return;
+	if (!append) {
+		historyLoaded = 0;
+		historyList.innerHTML = "";
+	}
+	void getPlatform()
+		.gitLog(
+			root,
+			{ limit: HISTORY_PAGE, skip: append ? historyLoaded : 0 },
+			(commit) => {
+				appendCommitRow(commit);
+				historyLoaded += 1;
+			},
+		)
+		.then(({ count }) => {
+			olderBtn.hidden = count < HISTORY_PAGE;
+		})
+		.catch((error) => {
+			olderBtn.hidden = true;
+			historyList.innerHTML = "";
+			const item = document.createElement("li");
+			item.textContent = `error: ${String(error)}`;
+			historyList.appendChild(item);
+		});
+}
+
+function refreshBranches(): void {
+	const { root } = store.get();
+	if (!root) return;
+	void getPlatform()
+		.gitBranches(root)
+		.then((list) => {
+			branchSelect.innerHTML = "";
+			for (const branch of list) {
+				const option = document.createElement("option");
+				option.value = branch.name;
+				option.textContent = branch.current ? `● ${branch.name}` : branch.name;
+				if (branch.current) option.selected = true;
+				branchSelect.appendChild(option);
+			}
+		})
+		.catch((error) => {
+			writeError.textContent = String(error);
+		});
+}
+
+/** Shows one commit's diff in the diff pane (commit vs its parent). */
+function viewCommit(oid: string): void {
+	selectedCommitOid = oid;
+	store.set({
+		...store.get(),
+		diffMode: "range",
+		diffFrom: `${oid}^`,
+		diffTo: oid,
+	});
+	void refreshDiff();
+	for (const row of historyList.children) {
+		row.classList.toggle("selected", (row as HTMLElement).dataset.oid === oid);
+	}
+}
+
+/** After a successful branch switch/create-with-switch: the worktree itself
+ * changed, so tree paths + status + diff all refresh and the diff view
+ * returns to the worktree mode. */
+function afterBranchChange(): Promise<void> {
+	const { root } = store.get();
+	store.set({ ...store.get(), diffMode: "worktree", diffFrom: "", diffTo: "" });
+	selectedCommitOid = null;
+	return refreshStatus()
+		.then(() => {
+			if (!root) return;
+			return getPlatform()
+				.gitWorktreePaths(root)
+				.then((paths) => tree?.setPaths(paths));
+		})
+		.then(() => {
+			refreshBranches();
+			historyList.innerHTML = "";
+			historyLoaded = 0;
+			refreshHistory();
+			return refreshDiff();
+		});
+}
+
+branchSelect.addEventListener("change", () => {
+	const { root } = store.get();
+	const name = branchSelect.value;
+	if (!root || !name) return;
+	void getPlatform()
+		.gitSwitchBranch(root, name)
+		.then(() => afterBranchChange())
+		.catch(showWriteError);
+});
+
+branchCreateBtn.addEventListener("click", () => {
+	const { root } = store.get();
+	const name = branchName.value.trim();
+	if (!root || !name) {
+		writeError.textContent = "Branch name is empty.";
+		return;
+	}
+	void getPlatform()
+		.gitCreateBranch(root, name, true)
+		.then(() => {
+			branchName.value = "";
+			writeError.textContent = "";
+			return afterBranchChange();
+		})
+		.catch(showWriteError);
+});
+
+olderBtn.addEventListener("click", () => refreshHistory(true));
 
 /** Samples requestAnimationFrame gaps while stepping the diff scroll — a
  * cheap jank proxy for the scroll-smoothness budget. SMOKE-only. */
@@ -454,10 +615,19 @@ function sampleScrollGaps(
 
 // ---- SMOKE=1 self-test (driven by the main process over RPC) ----
 window.addEventListener("hmmagainagain:self-test", (event) => {
-	const detail = (event as CustomEvent<{ root: string; stage?: boolean }>)
-		.detail;
+	const detail = (
+		event as CustomEvent<{
+			root: string;
+			stage?: boolean;
+			branch?: boolean;
+		}>
+	).detail;
 	const root = detail.root;
 	const run = async (): Promise<{ ok: boolean; detail: string }> => {
+		const loadError = getPlatformLoadError();
+		if (loadError) {
+			return { ok: false, detail: `LOAD ERR: ${loadError}` };
+		}
 		const status = await getPlatform().gitStatus(root);
 		await openRepo(root);
 		// Let the tree render its rows before counting them.
@@ -498,16 +668,33 @@ window.addEventListener("hmmagainagain:self-test", (event) => {
 				stageOk = stagedOk && unstagedOk && committedOk;
 			}
 		}
+		// SMOKE_BRANCH=1: branch create/switch flow — fixture repos ONLY.
+		let branchDetail = "branch=off";
+		let branchOk = true;
+		if (detail.branch) {
+			const smokeBranch = `u6-smoke-${Date.now()}`;
+			await getPlatform().gitCreateBranch(root, smokeBranch, true);
+			let list = await getPlatform().gitBranches(root);
+			const createdOk = list.find((b) => b.current)?.name === smokeBranch;
+			await getPlatform().gitSwitchBranch(root, "main");
+			list = await getPlatform().gitBranches(root);
+			const switchedOk = list.find((b) => b.current)?.name === "main";
+			branchDetail = `branch created=${createdOk} switchedBack=${switchedOk}`;
+			branchOk = createdOk && switchedOk;
+		}
 		const domOk =
 			treeRows > 0 &&
 			statusItems > 0 &&
 			store.get().root === root &&
 			(status.entries.length === 0 || diffTimings.files > 0) &&
-			(!detail.stage || stageOk);
-		const detailText = `treeRows=${treeRows} statusItems=${statusItems} entries=${status.entries.length} diffFiles=${diffTimings.files} diffTotalMs=${diffTotalMs.toFixed(0)} fetchMs=${diffTimings.fetchMs.toFixed(0)} parseMs=${diffTimings.parseMs.toFixed(0)} scrollMaxGap=${scroll.maxGap.toFixed(1)} scrollP95Gap=${scroll.p95Gap.toFixed(1)} ${stageDetail}`;
+			(!detail.stage || stageOk) &&
+			(!detail.branch || branchOk);
+		const detailText = `treeRows=${treeRows} statusItems=${statusItems} entries=${status.entries.length} diffFiles=${diffTimings.files} diffTotalMs=${diffTotalMs.toFixed(0)} fetchMs=${diffTimings.fetchMs.toFixed(0)} parseMs=${diffTimings.parseMs.toFixed(0)} scrollMaxGap=${scroll.maxGap.toFixed(1)} scrollP95Gap=${scroll.p95Gap.toFixed(1)} ${stageDetail} ${branchDetail}`;
 		return { ok: domOk, detail: detailText };
 	};
-	void run().then(({ ok, detail }) => sendSelfTestResult({ ok, detail }));
+	void run()
+		.then(({ ok, detail }) => sendSelfTestResult({ ok, detail }))
+		.catch((error) => sendSelfTestResult({ ok: false, detail: String(error) }));
 });
 
 interface RecentRepos {

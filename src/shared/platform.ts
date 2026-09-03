@@ -4,6 +4,7 @@
 // See docs/GOVERNANCE.md invariants: argv-only git, cwd pinned to the repo root.
 
 import type { RPCSchema } from "electrobun/main";
+import type { BranchInfo } from "../bun/git/branches";
 import type { DiffResult } from "../bun/git/diff";
 import type { LogCommit } from "../bun/git/log";
 import type { GitStatus } from "../bun/git/status-parser";
@@ -76,6 +77,21 @@ export interface Platform {
 	gitDiff(root: string, options?: GitDiffOptions): Promise<DiffResult>;
 	/** Sorted worktree file list (tracked + untracked, ignored excluded). */
 	gitWorktreePaths(root: string): Promise<string[]>;
+	/** Streamed commit history; onCommit fires per commit, in order. */
+	gitLog(
+		root: string,
+		options: { limit?: number; skip?: number; range?: string },
+		onCommit: (commit: LogCommit) => void,
+	): Promise<{ count: number }>;
+	/** Local head branches with the current marker. */
+	gitBranches(root: string): Promise<BranchInfo[]>;
+	/** Refuses on a dirty worktree when switching (never auto-discards). */
+	gitCreateBranch(
+		root: string,
+		name: string,
+		switchTo?: boolean,
+	): Promise<void>;
+	gitSwitchBranch(root: string, name: string): Promise<void>;
 	// ---- Write paths (U5). All are explicit user actions; staging touches
 	// only the index; commits run hooks and never bypass them. Failures carry
 	// git's stderr verbatim. ----
@@ -128,6 +144,18 @@ export type PlatformRPCSchema = {
 				params: { root: string };
 				response: { ok: boolean; paths?: string[]; error?: string };
 			};
+			gitBranches: {
+				params: { root: string };
+				response: { ok: boolean; branches?: BranchInfo[]; error?: string };
+			};
+			gitCreateBranch: {
+				params: { root: string; name: string; switchTo?: boolean };
+				response: { ok: boolean; error?: string };
+			};
+			gitSwitchBranch: {
+				params: { root: string; name: string };
+				response: { ok: boolean; error?: string };
+			};
 			// Write paths (U5). ok=false carries git's stderr verbatim.
 			stagePaths: {
 				params: { root: string; paths: string[] };
@@ -166,14 +194,16 @@ export type PlatformRPCSchema = {
 			};
 			/** Main → webview (SMOKE=1 only): run the platform self-test against root.
 			 * `stage` (SMOKE_STAGE=1) adds the fixture-only staging/commit flow. */
-			selfTestRun: { root: string; stage?: boolean };
+			selfTestRun: { root: string; stage?: boolean; branch?: boolean };
 			gitLogCommit: { logId: number; commit: LogCommit };
 			gitLogDone: { logId: number; ok: boolean; count: number; error?: string };
 		};
 	}>;
 };
 
+export type { BranchInfo } from "../bun/git/branches";
 export type { DiffFile, DiffResult } from "../bun/git/diff";
+export type { LogCommit } from "../bun/git/log";
 export type {
 	GitBranchInfo,
 	GitStatus,

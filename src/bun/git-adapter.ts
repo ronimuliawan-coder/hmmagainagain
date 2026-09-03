@@ -4,6 +4,12 @@
 // git/staging.ts behind explicit user actions and the serialized write queue.
 
 import type { GitRunOptions } from "../shared/platform";
+import {
+	type BranchInfo,
+	createBranch,
+	branches as listBranches,
+	switchBranch,
+} from "./git/branches";
 import { CatFileSession } from "./git/cat-file";
 import { type DiffOptions, type DiffResult, diff } from "./git/diff";
 import { GitError } from "./git/git-error";
@@ -28,6 +34,15 @@ export interface GitAdapter {
 	 * sorted — resetPaths input for U3. preparePresortedFileTreeInput remains
 	 * available if large-repo profiling (U8) shows prep cost matters. */
 	worktreePaths(root: string): Promise<string[]>;
+	/** Local head branches with the current marker (U6). */
+	branches(root: string): Promise<BranchInfo[]>;
+	/** Refuses on a dirty worktree before git runs — nothing is auto-discarded. */
+	createBranch(
+		root: string,
+		name: string,
+		options?: { switchTo?: boolean; startPoint?: string },
+	): Promise<void>;
+	switchBranch(root: string, name: string): Promise<void>;
 	openCatFile(root: string): CatFileSession;
 	/** Index/commit writes (U5). Serialized queue; staging touches only the
 	 * index; commits run hooks and never bypass them. */
@@ -88,6 +103,9 @@ export function createGitAdapter(): GitAdapter {
 		feedLog,
 		diff,
 		worktreePaths,
+		branches: listBranches,
+		createBranch,
+		switchBranch,
 		openCatFile: (root: string) => CatFileSession.start(root),
 		stagePaths: staging.stagePaths,
 		unstagePaths: staging.unstagePaths,

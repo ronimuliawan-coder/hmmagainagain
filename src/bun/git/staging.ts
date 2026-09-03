@@ -9,14 +9,7 @@
 
 import { spawnGit } from "../git-spawn";
 import { GitError } from "./git-error";
-
-let queueTail: Promise<unknown> = Promise.resolve();
-
-function enqueueWrite<T>(task: () => Promise<T>): Promise<T> {
-	const next = queueTail.then(task, task);
-	queueTail = next.catch(() => {});
-	return next;
-}
+import { enqueueWrite } from "./write-queue";
 
 async function runWrite(
 	root: string,

@@ -41,6 +41,15 @@ EndeavourOS (Arch-based), KDE on Wayland, webkit2gtk 4.1 present (2.52.6). The a
 launches from `build/<env>-linux-x64/hmmagainagain/bin/launcher`, which self-extracts to
 `~/.local/share/dev.hmmagainagain.app/<env>/app`.
 
+## Testing notes
+
+- **After `bun run build`, refresh the installed app before testing**: run the build
+  directory launcher (`build/<env>-linux-x64/hmmagainagain/bin/launcher`) once — it
+  re-extracts into `~/.local/share/dev.hmmagainagain.app/`. The installed launcher then
+  runs the NEW build; skipping this step silently tests a stale bundle.
+- SMOKE_STAGE / SMOKE_BRANCH flows mutate their target repository — point `SMOKE_ROOT`
+  at a throwaway fixture only.
+
 ## Known limitations
 
 - Branch protection unavailable (GitHub Free, private repo) — see

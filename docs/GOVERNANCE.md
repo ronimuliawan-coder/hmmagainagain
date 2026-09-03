@@ -61,7 +61,7 @@ A target-state document never overrides a still-active production safeguard.
 | U3 | [RON-296](https://linear.app/rons-space/issue/RON-296) | UI shell: repo picker, tree, status | **Done** (2026-09-03) |
 | U4 | [RON-297](https://linear.app/rons-space/issue/RON-297) | Diff view (CodeView + worker pool) | **Done** (2026-09-03) |
 | U5 | [RON-298](https://linear.app/rons-space/issue/RON-298) | Staging & commit (file + hunk) | **Done** (2026-09-03) |
-| U6 | [RON-299](https://linear.app/rons-space/issue/RON-299) | History & branch operations | Pending |
+| U6 | [RON-299](https://linear.app/rons-space/issue/RON-299) | History & branch operations | **Done** (2026-09-04) |
 | U7 | [RON-300](https://linear.app/rons-space/issue/RON-300) | Push / pull | Pending |
 | U8 | [RON-301](https://linear.app/rons-space/issue/RON-301) | Budget verification & Linux packaging | Pending |
 
