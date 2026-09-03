@@ -76,6 +76,19 @@ export interface Platform {
 	gitDiff(root: string, options?: GitDiffOptions): Promise<DiffResult>;
 	/** Sorted worktree file list (tracked + untracked, ignored excluded). */
 	gitWorktreePaths(root: string): Promise<string[]>;
+	// ---- Write paths (U5). All are explicit user actions; staging touches
+	// only the index; commits run hooks and never bypass them. Failures carry
+	// git's stderr verbatim. ----
+	/** Stages files (add -A): modifications, additions, and deletions. */
+	stagePaths(root: string, paths: string[]): Promise<void>;
+	/** Unstages files (restore --staged); the worktree is untouched. */
+	unstagePaths(root: string, paths: string[]): Promise<void>;
+	/** Applies a unified patch to the index only (apply --cached). Fails
+	 * honestly when the patch no longer matches the index. */
+	applyIndexPatch(root: string, patch: string): Promise<void>;
+	/** Commits the index with the given message. Hook failures reject with
+	 * the hook's output verbatim. */
+	commit(root: string, message: string): Promise<void>;
 }
 
 // ---- RPC transport schema (Electrobun typed RPC, used by the webview client) ----
@@ -115,6 +128,23 @@ export type PlatformRPCSchema = {
 				params: { root: string };
 				response: { ok: boolean; paths?: string[]; error?: string };
 			};
+			// Write paths (U5). ok=false carries git's stderr verbatim.
+			stagePaths: {
+				params: { root: string; paths: string[] };
+				response: { ok: boolean; error?: string };
+			};
+			unstagePaths: {
+				params: { root: string; paths: string[] };
+				response: { ok: boolean; error?: string };
+			};
+			applyIndexPatch: {
+				params: { root: string; patch: string };
+				response: { ok: boolean; error?: string };
+			};
+			commit: {
+				params: { root: string; message: string };
+				response: { ok: boolean; error?: string };
+			};
 		};
 		messages: {
 			/** Webview → main: result payload of the SMOKE self-test (SMOKE=1). */
@@ -134,8 +164,9 @@ export type PlatformRPCSchema = {
 				signal: string | null;
 				stderr: string;
 			};
-			/** Main → webview (SMOKE=1 only): run the platform self-test against root. */
-			selfTestRun: { root: string };
+			/** Main → webview (SMOKE=1 only): run the platform self-test against root.
+			 * `stage` (SMOKE_STAGE=1) adds the fixture-only staging/commit flow. */
+			selfTestRun: { root: string; stage?: boolean };
 			gitLogCommit: { logId: number; commit: LogCommit };
 			gitLogDone: { logId: number; ok: boolean; count: number; error?: string };
 		};

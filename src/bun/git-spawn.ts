@@ -18,6 +18,10 @@ export interface SpawnGitOptions extends GitRunOptions {
 	/** Extra environment for the child (fixtures use it for deterministic
 	 * author/date). Values merge over the inherited process env. */
 	env?: Record<string, string>;
+	/** Text piped to the child's stdin (e.g. a patch for `git apply -`).
+	 * Always closed immediately after writing so commands that never read
+	 * stdin see a clean EOF. */
+	stdin?: string;
 }
 
 export async function spawnGit(
@@ -26,18 +30,33 @@ export async function spawnGit(
 	opts?: SpawnGitOptions,
 ): Promise<GitRunResult> {
 	assertSafeArgs(args);
-	let proc: Subprocess<"ignore", "pipe", "pipe">;
+	let proc: Subprocess<"pipe", "pipe", "pipe">;
 	try {
 		proc = Bun.spawn(["git", ...args], {
 			cwd: root,
 			stdout: "pipe",
 			stderr: "pipe",
-			stdin: "ignore",
+			stdin: "pipe",
 			env: opts?.env ? { ...process.env, ...opts.env } : undefined,
 		});
 	} catch (error) {
 		// Missing git binary or a cwd that does not exist surface as ENOENT here.
 		throw new GitError(`failed to spawn git: ${String(error)}`, "", null);
+	}
+
+	// Feed stdin before draining so `git apply -` never deadlocks; a child
+	// that exits early makes the write fail, which its exit code reports.
+	if (opts?.stdin !== undefined) {
+		try {
+			proc.stdin?.write(opts.stdin);
+		} catch {
+			// child already gone — exit code / stderr carry the real error
+		}
+	}
+	try {
+		proc.stdin?.end();
+	} catch {
+		// already closed
 	}
 
 	// Wire abort → SIGTERM manually (instead of spawn's `signal` option) so the

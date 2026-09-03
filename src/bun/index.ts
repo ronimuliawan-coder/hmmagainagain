@@ -6,7 +6,7 @@
 
 import { BrowserView, BrowserWindow, Updater } from "electrobun/main";
 import type { FsEventBatch, PlatformRPCSchema } from "../shared/platform";
-import { createGitAdapter } from "./git-adapter";
+import { createGitAdapter, GitError } from "./git-adapter";
 import { createBunPlatform } from "./platform-bun";
 
 const DEV_SERVER_PORT = 5173;
@@ -161,6 +161,44 @@ const rpc = BrowserView.defineRPC<PlatformRPCSchema>({
 					return Promise.resolve({ ok: false as const, error: String(error) });
 				}
 			},
+			// Write paths (U5): ok=false carries git's stderr verbatim so the
+			// webview can display hook failures as-is.
+			stagePaths: ({ root, paths }) => {
+				return git
+					.stagePaths(root, paths)
+					.then(() => ({ ok: true as const }))
+					.catch((error: unknown) => ({
+						ok: false as const,
+						error: error instanceof GitError ? error.stderr : String(error),
+					}));
+			},
+			unstagePaths: ({ root, paths }) => {
+				return git
+					.unstagePaths(root, paths)
+					.then(() => ({ ok: true as const }))
+					.catch((error: unknown) => ({
+						ok: false as const,
+						error: error instanceof GitError ? error.stderr : String(error),
+					}));
+			},
+			applyIndexPatch: ({ root, patch }) => {
+				return git
+					.applyIndexPatch(root, patch)
+					.then(() => ({ ok: true as const }))
+					.catch((error: unknown) => ({
+						ok: false as const,
+						error: error instanceof GitError ? error.stderr : String(error),
+					}));
+			},
+			commit: ({ root, message }) => {
+				return git
+					.commit(root, message)
+					.then(() => ({ ok: true as const }))
+					.catch((error: unknown) => ({
+						ok: false as const,
+						error: error instanceof GitError ? error.stderr : String(error),
+					}));
+			},
 		},
 		messages: {
 			selfTestResult: ({ ok, detail }) => {
@@ -210,7 +248,12 @@ mainWindow = new BrowserWindow({
 if (process.env.SMOKE === "1") {
 	setTimeout(() => {
 		console.log("[SMOKE] dispatching selfTestRun");
-		send("selfTestRun", { root: process.env.SMOKE_ROOT ?? process.cwd() });
+		send("selfTestRun", {
+			root: process.env.SMOKE_ROOT ?? process.cwd(),
+			// SMOKE_STAGE=1 adds the staging/commit flow — ONLY ever point
+			// SMOKE_ROOT at a throwaway fixture when staging/committing.
+			stage: process.env.SMOKE_STAGE === "1",
+		});
 	}, 5000);
 }
 

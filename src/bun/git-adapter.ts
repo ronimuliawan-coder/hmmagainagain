@@ -1,13 +1,14 @@
 // GitAdapter — the typed semantic layer over the git binary. Everything above
 // this file speaks domain objects (GitStatus, LogCommit, DiffResult); nothing
-// above it knows git's CLI surface. Mutations do not exist here (U5 owns
-// staging/commit behind explicit user actions).
+// above it knows git's CLI surface. Mutations (U5 staging/commit) live in
+// git/staging.ts behind explicit user actions and the serialized write queue.
 
 import type { GitRunOptions } from "../shared/platform";
 import { CatFileSession } from "./git/cat-file";
 import { type DiffOptions, type DiffResult, diff } from "./git/diff";
 import { GitError } from "./git/git-error";
 import { feedLog, type LogCommit, type LogOptions, log } from "./git/log";
+import * as staging from "./git/staging";
 import { type GitStatus, parseStatusV2 } from "./git/status-parser";
 import { spawnGit } from "./git-spawn";
 
@@ -28,6 +29,12 @@ export interface GitAdapter {
 	 * available if large-repo profiling (U8) shows prep cost matters. */
 	worktreePaths(root: string): Promise<string[]>;
 	openCatFile(root: string): CatFileSession;
+	/** Index/commit writes (U5). Serialized queue; staging touches only the
+	 * index; commits run hooks and never bypass them. */
+	stagePaths(root: string, paths: string[]): Promise<void>;
+	unstagePaths(root: string, paths: string[]): Promise<void>;
+	applyIndexPatch(root: string, patch: string): Promise<void>;
+	commit(root: string, message: string): Promise<void>;
 }
 
 async function status(root: string): Promise<GitStatus> {
@@ -82,5 +89,9 @@ export function createGitAdapter(): GitAdapter {
 		diff,
 		worktreePaths,
 		openCatFile: (root: string) => CatFileSession.start(root),
+		stagePaths: staging.stagePaths,
+		unstagePaths: staging.unstagePaths,
+		applyIndexPatch: staging.applyIndexPatch,
+		commit: staging.commit,
 	};
 }

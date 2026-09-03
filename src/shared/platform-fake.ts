@@ -19,6 +19,36 @@ const TRACKED_CONTENT = "hello from the fake fixture\n";
 const LONG_RUN_ARGS = ["log", "--all", "--oneline", "--graph"];
 const LONG_RUN_MARKER = "commit-42-marker";
 
+// Index simulation for the U5 write paths. hello.txt starts staged (matching
+// the gitDiff fixture); unstaging flips it to a worktree-only modification so
+// the stage action has something to act on — a UI-dev fiction, kept local.
+const staged = new Set<string>([TRACKED_FILE]);
+let commitCount = 0;
+const headOid = () =>
+	`f4k3h34d0000000000000000000000000000000${(1 + commitCount) % 10}`;
+
+const fakeStatusEntries = (): GitStatus["entries"] => [
+	staged.has(TRACKED_FILE)
+		? {
+				path: TRACKED_FILE,
+				indexStatus: "M",
+				worktreeStatus: ".",
+				origin: "changed",
+			}
+		: {
+				path: TRACKED_FILE,
+				indexStatus: ".",
+				worktreeStatus: "M",
+				origin: "changed",
+			},
+	{
+		path: "untracked file.txt",
+		indexStatus: "?",
+		worktreeStatus: "?",
+		origin: "untracked",
+	},
+];
+
 interface FakeCommand {
 	match(args: string[]): boolean;
 	run(
@@ -114,8 +144,8 @@ export function buildFakeFixture() {
 			if (root !== FAKE_REPO) {
 				return Promise.reject(new Error(`not a git repository: ${root}`));
 			}
-			// The fake's staged hello.txt change (see the gitStatus fixture) as
-			// the unified patch the real adapter would emit for `--cached`.
+			// The staged hello.txt change (see gitStatus) as the unified patch
+			// the real adapter would emit for `--cached`.
 			const patch = [
 				"diff --git a/hello.txt b/hello.txt",
 				"index 30d74d2..49ee2cb 100644",
@@ -139,23 +169,10 @@ export function buildFakeFixture() {
 			}
 			const status: GitStatus = {
 				branch: {
-					oid: "f4k3h34d00000000000000000000000000000001",
+					oid: headOid(),
 					head: "main",
 				},
-				entries: [
-					{
-						path: "hello.txt",
-						indexStatus: "M",
-						worktreeStatus: ".",
-						origin: "changed",
-					},
-					{
-						path: "untracked file.txt",
-						indexStatus: "?",
-						worktreeStatus: "?",
-						origin: "untracked",
-					},
-				],
+				entries: fakeStatusEntries(),
 			};
 			return Promise.resolve(status);
 		},
@@ -166,6 +183,39 @@ export function buildFakeFixture() {
 			return Promise.resolve(
 				["hello.txt", "src/nested.txt", "untracked file.txt"].sort(),
 			);
+		},
+		// ---- Write paths (U5): minimal index simulation for browser dev ----
+		stagePaths: (root, paths) => {
+			if (root !== FAKE_REPO) {
+				return Promise.reject(new Error(`not a git repository: ${root}`));
+			}
+			for (const path of paths) staged.add(path);
+			return Promise.resolve();
+		},
+		unstagePaths: (root, paths) => {
+			if (root !== FAKE_REPO) {
+				return Promise.reject(new Error(`not a git repository: ${root}`));
+			}
+			for (const path of paths) staged.delete(path);
+			return Promise.resolve();
+		},
+		applyIndexPatch: (root) => {
+			if (root !== FAKE_REPO) {
+				return Promise.reject(new Error(`not a git repository: ${root}`));
+			}
+			// The fake has no real index to patch; the staged state is untouched.
+			return Promise.resolve();
+		},
+		commit: (root, message) => {
+			if (root !== FAKE_REPO) {
+				return Promise.reject(new Error(`not a git repository: ${root}`));
+			}
+			if (message.trim().length === 0 || staged.size === 0) {
+				return Promise.reject(new Error("no changes added to commit (fake)"));
+			}
+			commitCount += 1;
+			staged.clear();
+			return Promise.resolve();
 		},
 		watchRepo: (root, onEvents) => {
 			if (root !== FAKE_REPO) {

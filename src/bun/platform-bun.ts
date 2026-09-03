@@ -68,6 +68,22 @@ export function createBunPlatform(): Platform {
 			return git.worktreePaths(root);
 		},
 
+		stagePaths(root: string, paths: string[]) {
+			return git.stagePaths(root, paths);
+		},
+
+		unstagePaths(root: string, paths: string[]) {
+			return git.unstagePaths(root, paths);
+		},
+
+		applyIndexPatch(root: string, patch: string) {
+			return git.applyIndexPatch(root, patch);
+		},
+
+		commit(root: string, message: string) {
+			return git.commit(root, message);
+		},
+
 		watchRepo(root: string, onEvents: (batch: FsEventBatch) => void) {
 			return new Promise<{ stop: () => Promise<void> }>((resolve, reject) => {
 				const pending = new Set<string>();
