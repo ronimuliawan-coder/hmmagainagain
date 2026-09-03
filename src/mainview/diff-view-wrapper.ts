@@ -44,7 +44,14 @@ export interface DiffViewHandle {
 	destroy(): void;
 }
 
-export function mountDiffView(container: HTMLElement): DiffViewHandle {
+export function mountDiffView(
+	container: HTMLElement,
+	onSelectionChange?: (selection: {
+		id: string;
+		start: number;
+		end: number;
+	}) => void,
+): DiffViewHandle {
 	const pool = getOrCreateWorkerPoolSingleton({
 		poolOptions: {
 			poolSize: POOL_SIZE,
@@ -65,6 +72,15 @@ export function mountDiffView(container: HTMLElement): DiffViewHandle {
 			theme: { ...THEME },
 			diffStyle: style,
 			stickyHeaders: true,
+			enableLineSelection: true,
+			onSelectedLinesChange: (selection) => {
+				if (!selection) return;
+				onSelectionChange?.({
+					id: selection.id,
+					start: selection.range.start,
+					end: selection.range.end,
+				});
+			},
 		},
 		pool,
 	);

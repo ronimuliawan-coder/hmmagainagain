@@ -215,14 +215,100 @@ body {
 }
 
 #tree-pane,
-#status-pane,
 #diff-pane {
 	overflow: auto;
 	padding: 8px 12px;
 }
 
+#status-pane {
+	display: flex;
+	flex-direction: column;
+	padding: 8px 12px;
+}
+
 #tree-pane {
 	border-right: 1px solid #2a2e34;
+}
+
+#status-list {
+	flex: 1;
+	overflow: auto;
+}
+
+#commit-box {
+	border-top: 1px solid #2a2e34;
+	padding-top: 8px;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+#commit-message {
+	resize: vertical;
+	min-height: 48px;
+	background: #101215;
+	color: inherit;
+	border: 1px solid #2a2e34;
+	border-radius: 6px;
+	padding: 6px 8px;
+	font: inherit;
+}
+
+#write-error {
+	white-space: pre-line;
+	color: #e06c75;
+	font-family: ui-monospace, monospace;
+	font-size: 0.72rem;
+	margin: 0;
+	max-height: 110px;
+	overflow: auto;
+}
+
+#commit-actions {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+
+#staged-count {
+	font-size: 0.78rem;
+	color: #9aa4ae;
+}
+
+#commit-actions button {
+	padding: 4px 14px;
+	font-size: 0.8rem;
+	border-radius: 5px;
+	border: 1px solid #2a2e34;
+	background: #101215;
+	color: #e6e6e6;
+	cursor: pointer;
+}
+
+#commit-actions button:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+
+.status-action {
+	margin-left: auto;
+	font-size: 0.68rem;
+	padding: 1px 7px;
+	background: #101215;
+	color: #9aa4ae;
+	border: 1px solid #2a2e34;
+	border-radius: 4px;
+	cursor: pointer;
+}
+
+.status-action:hover {
+	color: #e6e6e6;
+	border-color: #61afef;
+}
+
+#diff-toolbar button:disabled {
+	opacity: 0.4;
+	cursor: default;
 }
 
 #diff-pane {

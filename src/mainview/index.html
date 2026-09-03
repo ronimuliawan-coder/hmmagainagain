@@ -21,6 +21,18 @@
       <section id="status-pane">
         <h2>Changed files</h2>
         <ul id="status-list"></ul>
+        <div id="commit-box">
+          <pre id="write-error"></pre>
+          <textarea
+            id="commit-message"
+            placeholder="Commit message"
+            rows="3"
+          ></textarea>
+          <div id="commit-actions">
+            <span id="staged-count">0 staged</span>
+            <button type="button" id="commit-btn" disabled>Commit</button>
+          </div>
+        </div>
       </section>
       <section id="diff-pane">
         <div id="diff-toolbar">
@@ -33,6 +45,9 @@
           <span id="diff-info"></span>
           <button type="button" id="diff-style-unified">Unified</button>
           <button type="button" id="diff-style-split">Split</button>
+          <button type="button" id="stage-selected-btn" disabled>
+            Stage selected
+          </button>
         </div>
         <div id="diff-container"></div>
       </section>
