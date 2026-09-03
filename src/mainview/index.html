@@ -22,6 +22,20 @@
         <h2>Changed files</h2>
         <ul id="status-list"></ul>
       </section>
+      <section id="diff-pane">
+        <div id="diff-toolbar">
+          <button type="button" data-diff-range="worktree">Worktree</button>
+          <button type="button" data-diff-range="staged">Staged</button>
+          <button type="button" data-diff-range="head">HEAD</button>
+          <input id="diff-from" placeholder="from" aria-label="from commit" />
+          <input id="diff-to" placeholder="to" aria-label="to commit" />
+          <button type="button" id="diff-range-apply">Go</button>
+          <span id="diff-info"></span>
+          <button type="button" id="diff-style-unified">Unified</button>
+          <button type="button" id="diff-style-split">Split</button>
+        </div>
+        <div id="diff-container"></div>
+      </section>
     </main>
     <script type="module" src="/main.ts"></script>
   </body>

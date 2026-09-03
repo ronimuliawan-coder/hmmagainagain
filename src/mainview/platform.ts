@@ -7,6 +7,7 @@
 import Electrobun from "electrobun/view";
 import type {
 	FsEventBatch,
+	GitDiffOptions,
 	GitRunOptions,
 	GitRunResult,
 	Platform,
@@ -189,6 +190,12 @@ function createRpcPlatform(): Platform {
 			rpc.request.gitStatus({ root }).then((r) => {
 				if (!r.ok || !r.status) throw new Error(r.error ?? "gitStatus failed");
 				return r.status;
+			}),
+
+		gitDiff: (root: string, options?: GitDiffOptions) =>
+			rpc.request.gitDiff({ root, ...options }).then((r) => {
+				if (!r.ok || !r.result) throw new Error(r.error ?? "gitDiff failed");
+				return r.result;
 			}),
 
 		gitWorktreePaths: (root: string) =>

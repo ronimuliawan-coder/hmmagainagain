@@ -105,9 +105,23 @@ const rpc = BrowserView.defineRPC<PlatformRPCSchema>({
 			},
 			gitDiff: ({ root, from, to, staged }) => {
 				try {
+					// Adapter throws GitError on failure; bridge it into ok/error.
+					const startedAt = Date.now();
 					return git
 						.diff(root, { from, to, staged })
-						.then((result) => ({ ok: true as const, result }));
+						.then((result) => {
+							if (process.env.SMOKE === "1") {
+								// Budget evidence: adapter-side diff+transfer cost.
+								console.log(
+									`[SMOKE] gitDiff adapter ${Date.now() - startedAt}ms files=${result.files.length} bytes=${result.patch.length}`,
+								);
+							}
+							return { ok: true as const, result };
+						})
+						.catch((error: unknown) => ({
+							ok: false as const,
+							error: String(error),
+						}));
 				} catch (error) {
 					return Promise.resolve({ ok: false as const, error: String(error) });
 				}

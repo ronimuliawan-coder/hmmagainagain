@@ -5,6 +5,7 @@
 import { type FSWatcher, watch } from "node:fs";
 import type {
 	FsEventBatch,
+	GitDiffOptions,
 	GitRunOptions,
 	GitRunResult,
 	Platform,
@@ -57,6 +58,10 @@ export function createBunPlatform(): Platform {
 
 		gitStatus(root: string) {
 			return git.status(root);
+		},
+
+		gitDiff(root: string, options?: GitDiffOptions) {
+			return git.diff(root, options);
 		},
 
 		gitWorktreePaths(root: string) {

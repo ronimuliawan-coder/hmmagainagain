@@ -39,6 +39,12 @@ export function runConformance(
 			).rejects.toThrow();
 		});
 
+		test("gitDiff rejects a non-repo", async () => {
+			await expect(
+				makePlatform().gitDiff(fixture.nonRepoRoot),
+			).rejects.toThrow();
+		});
+
 		test("runGit returns exit code and verbatim stdout", async () => {
 			const chunks: Uint8Array[] = [];
 			const result = await makePlatform().runGit(

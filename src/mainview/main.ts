@@ -1,5 +1,10 @@
 import "./style.css";
-import type { GitStatus, RepoInfo } from "../shared/platform";
+import type { GitDiffOptions, GitStatus, RepoInfo } from "../shared/platform";
+import {
+	type DiffStyle,
+	type DiffViewHandle,
+	mountDiffView,
+} from "./diff-view-wrapper";
 import { mountFileTree, type TreeHandle } from "./file-tree-wrapper";
 import { statusToTreeEntries } from "./git-status-mapping";
 import { getPlatform, sendSelfTestResult } from "./platform";
@@ -35,19 +40,50 @@ const statusList = byId<HTMLUListElement>("status-list");
 const repoInfo = byId<HTMLSpanElement>("repo-info");
 const repoInput = byId<HTMLInputElement>("repo-path");
 const openBtn = byId<HTMLButtonElement>("open-btn");
+const diffContainer = byId<HTMLDivElement>("diff-container");
+const diffInfo = byId<HTMLSpanElement>("diff-info");
+const rangeButtons = [
+	...document.querySelectorAll<HTMLButtonElement>(
+		"#diff-toolbar [data-diff-range]",
+	),
+];
+const diffApplyBtn = byId<HTMLButtonElement>("diff-range-apply");
+const diffFromInput = byId<HTMLInputElement>("diff-from");
+const diffToInput = byId<HTMLInputElement>("diff-to");
+const unifiedBtn = byId<HTMLButtonElement>("diff-style-unified");
+const splitBtn = byId<HTMLButtonElement>("diff-style-split");
+
+type DiffMode = "worktree" | "staged" | "head" | "range";
 
 interface AppState {
 	/** Opened repository root ("" when none). */
 	root: string;
 	info: RepoInfo | null;
 	status: GitStatus | null;
+	diffMode: DiffMode;
+	diffFrom: string;
+	diffTo: string;
+	diffStyle: DiffStyle;
 }
 
-const store = createStore<AppState>({ root: "", info: null, status: null });
+const store = createStore<AppState>({
+	root: "",
+	info: null,
+	status: null,
+	diffMode: "worktree",
+	diffFrom: "",
+	diffTo: "",
+	diffStyle: "unified",
+});
 
 let tree: TreeHandle | null = null;
+let diffView: DiffViewHandle | null = null;
 let watcher: { stop: () => Promise<void> } | null = null;
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+// Guards against applying a stale diff response after a rapid range switch.
+let diffSeq = 0;
+// Stage timings of the last diff load — read by the SMOKE self-test.
+const diffTimings = { fetchMs: 0, parseMs: 0, files: 0 };
 
 function readRecents(): RecentRepos {
 	try {
@@ -94,9 +130,10 @@ function renderStatusList(status: GitStatus): void {
 	}
 	for (const entry of status.entries) {
 		const item = document.createElement("li");
-		const letter = document.createElement("span");
 		const active =
 			entry.worktreeStatus !== "." ? entry.worktreeStatus : entry.indexStatus;
+		item.dataset.path = entry.path;
+		const letter = document.createElement("span");
 		// CSS classes can't carry raw porcelain letters (?, ., !) — slug them.
 		letter.className = `status-letter status-${statusSlug(active)}`;
 		letter.textContent = active;
@@ -118,6 +155,14 @@ function render(state: AppState): void {
 		tree?.setGitStatus(statusToTreeEntries(state.status.entries));
 	}
 	if (state.info && state.status) renderRepoInfo(state.info, state.status);
+	for (const button of rangeButtons) {
+		button.classList.toggle(
+			"active",
+			button.dataset.diffRange === state.diffMode,
+		);
+	}
+	unifiedBtn.classList.toggle("active", state.diffStyle === "unified");
+	splitBtn.classList.toggle("active", state.diffStyle === "split");
 }
 
 store.subscribe(render);
@@ -127,13 +172,63 @@ async function refreshStatus(): Promise<void> {
 	if (!root) return;
 	const status = await getPlatform().gitStatus(root);
 	const info = await getPlatform().readRepo(root);
-	store.set({ root, info, status });
+	store.set({ ...store.get(), root, info, status });
+}
+
+function diffOptionsFor(state: AppState): GitDiffOptions {
+	switch (state.diffMode) {
+		case "staged":
+			return { staged: true };
+		case "head":
+			return { from: "HEAD" };
+		case "range":
+			return { from: state.diffFrom, to: state.diffTo };
+		default:
+			return {};
+	}
+}
+
+async function refreshDiff(): Promise<void> {
+	const state = store.get();
+	if (!state.root) return;
+	if (!diffView) diffView = mountDiffView(diffContainer);
+	const seq = ++diffSeq;
+	try {
+		const t0 = performance.now();
+		const result = await getPlatform().gitDiff(
+			state.root,
+			diffOptionsFor(state),
+		);
+		const fetchMs = performance.now() - t0;
+		if (seq !== diffSeq) return; // a newer request superseded this one
+		const t1 = performance.now();
+		diffView.setPatch(result.patch);
+		const parseMs = performance.now() - t1;
+		diffTimings.fetchMs = fetchMs;
+		diffTimings.parseMs = parseMs;
+		diffTimings.files = result.files.length;
+		diffInfo.textContent = `${result.files.length} file(s)`;
+	} catch (error) {
+		// Surface bad ranges (e.g. unknown ref) in the pane, not as a rejection.
+		if (seq === diffSeq) {
+			diffTimings.files = 0;
+			diffInfo.textContent = `error: ${String(error)}`;
+		}
+	}
 }
 
 function scheduleStatusRefresh(): void {
 	if (refreshTimer) clearTimeout(refreshTimer);
 	refreshTimer = setTimeout(() => {
-		void refreshStatus().catch(() => {});
+		void refreshStatus()
+			.then(() => {
+				const { diffMode } = store.get();
+				// HEAD and explicit ranges are static under worktree edits.
+				if (diffMode === "worktree" || diffMode === "staged") {
+					return refreshDiff();
+				}
+			})
+			.catch(() => {});
 	}, REFRESH_DEBOUNCE_MS);
 }
 
@@ -145,13 +240,15 @@ async function openRepo(root: string): Promise<string> {
 	]);
 	if (!tree) tree = mountFileTree(treeContainer);
 	tree.setPaths(paths);
+	if (!diffView) diffView = mountDiffView(diffContainer);
 
 	// Watcher-driven refresh: one subscription per open repository.
 	if (watcher) await watcher.stop();
 	watcher = await getPlatform().watchRepo(root, scheduleStatusRefresh);
 
 	saveRecent(root);
-	store.set({ root, info, status });
+	store.set({ ...store.get(), root, info, status });
+	void refreshDiff();
 	return `${info.branch} · ${info.head.slice(0, 7)} · ${status.entries.length} change(s)`;
 }
 
@@ -167,7 +264,85 @@ openBtn.addEventListener("click", () => {
 		});
 });
 
+// ---- Diff toolbar + status-list interactions ----
+const setDiffState = (partial: Partial<AppState>): void => {
+	store.set({ ...store.get(), ...partial });
+	void refreshDiff();
+};
+
+for (const button of rangeButtons) {
+	button.addEventListener("click", () => {
+		const mode = button.dataset.diffRange as DiffMode | undefined;
+		if (!mode || mode === "range") return;
+		setDiffState({ diffMode: mode });
+	});
+}
+
+diffApplyBtn.addEventListener("click", () => {
+	setDiffState({
+		diffMode: "range",
+		diffFrom: diffFromInput.value.trim(),
+		diffTo: diffToInput.value.trim(),
+	});
+});
+
+for (const [button, style] of [
+	[unifiedBtn, "unified"],
+	[splitBtn, "split"],
+] as const) {
+	button.addEventListener("click", () => {
+		// Style is a render option — no refetch, just re-render in place.
+		store.set({ ...store.get(), diffStyle: style });
+		diffView?.setDiffStyle(style);
+	});
+}
+
+// Clicking a changed file jumps the diff to that file's item.
+statusList.addEventListener("click", (event) => {
+	const item = (event.target as HTMLElement | null)?.closest("li");
+	const path = item?.dataset.path;
+	if (path) diffView?.scrollToFile(path);
+});
+
 renderRecents();
+
+/** Samples requestAnimationFrame gaps while stepping the diff scroll — a
+ * cheap jank proxy for the scroll-smoothness budget. SMOKE-only. */
+function sampleScrollGaps(
+	durationMs: number,
+): Promise<{ maxGap: number; p95Gap: number }> {
+	const gaps: number[] = [];
+	let last = performance.now();
+	const start = last;
+	return new Promise((resolve) => {
+		const step = (now: number) => {
+			gaps.push(now - last);
+			last = now;
+			// Step the scroll; wrap at the bottom to keep frames flowing.
+			diffContainer.scrollTop += Math.max(
+				120,
+				diffContainer.clientHeight * 0.15,
+			);
+			if (
+				diffContainer.scrollTop + diffContainer.clientHeight >=
+				diffContainer.scrollHeight - 1
+			) {
+				diffContainer.scrollTop = 0;
+			}
+			if (now - start >= durationMs) {
+				const sorted = [...gaps].sort((a, b) => a - b);
+				const p95 =
+					sorted[
+						Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))
+					] ?? 0;
+				resolve({ maxGap: sorted[sorted.length - 1] ?? 0, p95Gap: p95 });
+				return;
+			}
+			requestAnimationFrame(step);
+		};
+		requestAnimationFrame(step);
+	});
+}
 
 // ---- SMOKE=1 self-test (driven by the main process over RPC) ----
 window.addEventListener("hmmagainagain:self-test", (event) => {
@@ -179,8 +354,19 @@ window.addEventListener("hmmagainagain:self-test", (event) => {
 		await new Promise((resolve) => setTimeout(resolve, 500));
 		const treeRows = tree?.getRowCount() ?? 0;
 		const statusItems = statusList.children.length;
-		const domOk = treeRows > 0 && statusItems > 0 && store.get().root === root;
-		const detail = `treeRows=${treeRows} statusItems=${statusItems} entries=${status.entries.length}`;
+		// Diff flow + stage timings (RON-297 budget evidence).
+		const diffT0 = performance.now();
+		await refreshDiff();
+		const diffTotalMs = performance.now() - diffT0;
+		// First diff paint, then sample frame gaps while scrolling.
+		await new Promise((resolve) => requestAnimationFrame(resolve));
+		const scroll = await sampleScrollGaps(1500);
+		const domOk =
+			treeRows > 0 &&
+			statusItems > 0 &&
+			store.get().root === root &&
+			(status.entries.length === 0 || diffTimings.files > 0);
+		const detail = `treeRows=${treeRows} statusItems=${statusItems} entries=${status.entries.length} diffFiles=${diffTimings.files} diffTotalMs=${diffTotalMs.toFixed(0)} fetchMs=${diffTimings.fetchMs.toFixed(0)} parseMs=${diffTimings.parseMs.toFixed(0)} scrollMaxGap=${scroll.maxGap.toFixed(1)} scrollP95Gap=${scroll.p95Gap.toFixed(1)}`;
 		return { ok: domOk, detail };
 	};
 	void run().then(({ ok, detail }) => sendSelfTestResult({ ok, detail }));

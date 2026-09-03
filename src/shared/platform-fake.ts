@@ -110,6 +110,29 @@ export function buildFakeFixture() {
 					return result;
 				});
 		},
+		gitDiff: (root) => {
+			if (root !== FAKE_REPO) {
+				return Promise.reject(new Error(`not a git repository: ${root}`));
+			}
+			// The fake's staged hello.txt change (see the gitStatus fixture) as
+			// the unified patch the real adapter would emit for `--cached`.
+			const patch = [
+				"diff --git a/hello.txt b/hello.txt",
+				"index 30d74d2..49ee2cb 100644",
+				"--- a/hello.txt",
+				"+++ b/hello.txt",
+				"@@ -1 +1,2 @@",
+				" hello from the fake fixture",
+				"+staged in the fake fixture",
+				"",
+			].join("\n");
+			return Promise.resolve({
+				files: [
+					{ path: TRACKED_FILE, additions: 1, deletions: 0, binary: false },
+				],
+				patch,
+			});
+		},
 		gitStatus: (root) => {
 			if (root !== FAKE_REPO) {
 				return Promise.reject(new Error(`not a git repository: ${root}`));
