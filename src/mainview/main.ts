@@ -20,6 +20,14 @@ import {
 } from "./platform";
 import { createStore } from "./store";
 
+// U8b cold-start proxy: first compositor frame in the webview, on the shared
+// Date.now wall clock. Surfaces in main-process output only if Electrobun
+// forwards webview console output; its absence is itself a finding (proxy
+// falls back to the main-ready marker with a stated limit).
+requestAnimationFrame(() => {
+	console.log(`[STARTUP] first-frame wall=${Date.now()}`);
+});
+
 const RECENTS_KEY = "hmmagainagain.recents";
 const REFRESH_DEBOUNCE_MS = 300;
 

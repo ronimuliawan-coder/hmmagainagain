@@ -83,6 +83,35 @@ ram)
 	done
 	echo "pid_tree_rss_KiB=$total budget=153600KiB"
 	;;
+coldstart)
+	runs="${1:-10}"
+	profile
+	installed="$(find "$HOME/.local/share/dev.hmmagainagain.app" -name launcher -type f -newermt '-60 minutes' 2>/dev/null | head -1)"
+	if [ -z "$installed" ]; then echo "no recently extracted launcher found" >&2; exit 1; fi
+	echo "installed=$installed (each run pops a window for ~2s)"
+	for i in $(seq 1 "$runs"); do
+		# NOTE: [p] keeps pkill from matching this script's own command line.
+		pkill -f "hmmagainagain/ap[p]" 2>/dev/null || true
+		sleep 1
+		log="$(mktemp /tmp/coldstart-XXXXXX.log)"
+		start_ns="$(date +%s%N)"
+		"$installed" >"$log" 2>&1 &
+		for _ in $(seq 1 15); do
+			sleep 1
+			grep -q "started! wall=" "$log" 2>/dev/null && break
+		done
+		wall="$(grep -o "started! wall=[0-9]*" "$log" | grep -o "[0-9]*" | head -1 || true)"
+		internal="$(grep -o "started! wall=[0-9]* +[0-9]*ms" "$log" | grep -o "+[0-9]*ms" | head -1 || echo "?")"
+		frame="$(grep -o "first-frame wall=[0-9]*" "$log" | grep -o "[0-9]*" | head -1 || echo "ABSENT")"
+		if [ -n "$wall" ]; then
+			exec_ms="$(awk "BEGIN {printf \"%.0f\", ($wall*1000000 - $start_ns)/1000000}")"
+		else
+			exec_ms="?"
+		fi
+		echo "run=$i exec_to_main_ms=$exec_ms main_internal=$internal first_frame=$frame"
+		pkill -f "hmmagainagain/ap[p]" 2>/dev/null || true
+	done
+	;;
 *)
 	echo "usage: $0 {size|adapter-fetch|smoke|ram}" >&2; exit 1 ;;
 esac
