@@ -39,12 +39,12 @@ run([
 	"baseline",
 ]);
 
-// Worktree change: exactly lineCount padded lines replacing the baseline.
-const chunk = "const value = 1; // diff budget fixture line\n";
-const fullChunks = Math.floor(lineCount / 10_000);
-const remainder = lineCount % 10_000;
-let contents = chunk.repeat(fullChunks);
-if (remainder > 0) contents += chunk.repeat(remainder);
+// Worktree change: lineCount padded lines replacing the baseline.
+const chunkText = "const value = 1; // diff budget fixture line\n".repeat(
+	10_000,
+);
+let contents = "";
+for (let i = 0; i < Math.ceil(lineCount / 10_000); i++) contents += chunkText;
 writeFileSync(join(target, "big.txt"), contents);
 
 console.log(`fixture ready: ${target} (~${lineCount} changed lines)`);
