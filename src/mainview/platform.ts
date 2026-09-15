@@ -77,6 +77,8 @@ const remoteDone = new Map<
 		reject: (e: Error) => void;
 	}
 >();
+/** Abort-listener cleanups, keyed by op id (U7b). */
+const remoteAbortCleanups = new Map<number, () => void>();
 
 function deliver(
 	run: RunState,
@@ -187,6 +189,8 @@ function ensureRpc(): RpcInstance {
 					if (pending) {
 						remoteDone.delete(msg.opId);
 						remoteListeners.delete(msg.opId);
+						remoteAbortCleanups.get(msg.opId)?.();
+						remoteAbortCleanups.delete(msg.opId);
 						if (msg.ok) {
 							pending.resolve({ ok: true, stderr: msg.stderr });
 						} else {
@@ -329,6 +333,23 @@ function createRpcPlatform(): Platform {
 					// forever (U7a). No early-done buffer exists on this path,
 					// so there is no early packet to drain here.
 					remoteDone.set(opId, { ok: false, stderr: "", resolve, reject });
+					// Cancellation (U7b): forward the caller's abort to the
+					// server, which kills the child via its own controller.
+					if (options.signal) {
+						const signal = options.signal;
+						const onAbort = () => {
+							remoteAbortCleanups.delete(opId);
+							void rpc.request.gitRemoteAbort({ opId });
+						};
+						if (signal.aborted) {
+							onAbort();
+						} else {
+							remoteAbortCleanups.set(opId, () =>
+								signal.removeEventListener("abort", onAbort),
+							);
+							signal.addEventListener("abort", onAbort, { once: true });
+						}
+					}
 				})();
 			}),
 

@@ -14,6 +14,7 @@ const harness = {
 	messages: {} as Record<string, MsgHandler>,
 	nextOpId: 0,
 	nextLogId: 0,
+	abortCalls: [] as number[],
 };
 
 // Function object: `new`-able for `new Electrobun.Electroview(...)` in
@@ -26,7 +27,10 @@ const FakeElectroview = Object.assign(
 			return {
 				request: {
 					gitRemoteStart: async () => ({ opId: ++harness.nextOpId }),
-					gitRemoteAbort: async () => ({ ok: true }),
+					gitRemoteAbort: async (params: { opId: number }) => {
+						harness.abortCalls.push(params.opId);
+						return { ok: true };
+					},
 					gitLogStart: async () => ({ logId: ++harness.nextLogId }),
 				},
 				send: {},
@@ -110,6 +114,27 @@ describe("rpc platform gitRemote settling (U7a)", () => {
 			stderr: "",
 		});
 		expect(lines).toEqual(["remote: counting\n"]);
+	});
+
+	test("aborting the passed signal requests gitRemoteAbort (U7b)", async () => {
+		const platform = getPlatform();
+		const controller = new AbortController();
+		const pending = platform.gitRemote(
+			"root",
+			"pull",
+			{ remote: "origin", signal: controller.signal },
+			() => {},
+		);
+		// Swallow the settlement: this test observes the abort request only;
+		// the done packet arrives below.
+		void pending.catch(() => {});
+		await flush();
+		const opId = harness.nextOpId;
+		controller.abort();
+		await flush();
+		expect(harness.abortCalls).toContain(opId);
+		harness.messages.gitRemoteDone({ opId, ok: false, stderr: "killed" });
+		await flush();
 	});
 
 	test("sibling class: gitLog settles when gitLogDone arrives", async () => {

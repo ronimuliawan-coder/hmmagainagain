@@ -137,6 +137,20 @@ describe("GitAdapter remote ops (golden)", () => {
 		expect(Number(behind.trim())).toBe(2);
 	});
 
+	test("an aborted signal kills the op instead of running it", async () => {
+		const controller = new AbortController();
+		controller.abort();
+		const error = await adapter
+			.remoteOp(workPath, "fetch", {
+				remote: "origin",
+				signal: controller.signal,
+			})
+			.then(() => null)
+			.catch((e: unknown) => e);
+		// spawnGit SIGTERMs on abort; the nonzero exit surfaces as GitError.
+		expect(error).toBeInstanceOf(GitError);
+	});
+
 	test("push -u sets upstream tracking", async () => {
 		await gitIn(workPath, "checkout", "-q", "-b", "feature/tracked");
 		await adapter.remoteOp(workPath, "push", {

@@ -75,6 +75,7 @@ const olderBtn = byId<HTMLButtonElement>("older-btn");
 const pushBtn = byId<HTMLButtonElement>("push-btn");
 const pullBtn = byId<HTMLButtonElement>("pull-btn");
 const fetchBtn = byId<HTMLButtonElement>("fetch-btn");
+const cancelBtn = byId<HTMLButtonElement>("cancel-btn");
 const remoteProgress = byId<HTMLPreElement>("remote-progress");
 
 type DiffMode = "worktree" | "staged" | "head" | "range";
@@ -460,21 +461,30 @@ renderRecents();
 
 // ---- U7: push/pull/fetch ----
 let remoteOpRunning = false;
+let remoteController: AbortController | null = null;
 
 async function runRemote(op: "fetch" | "push" | "pull"): Promise<void> {
 	const { root, info } = store.get();
 	if (!root || remoteOpRunning) return;
 	const branch = info?.branch === "(detached)" ? undefined : info?.branch;
+	const controller = new AbortController();
+	remoteController = controller;
 	remoteOpRunning = true;
 	pushBtn.disabled = true;
 	pullBtn.disabled = true;
 	fetchBtn.disabled = true;
+	cancelBtn.disabled = false;
 	remoteProgress.textContent = `${op} …`;
 	try {
 		const result = await getPlatform().gitRemote(
 			root,
 			op,
-			{ remote: "origin", branch, setUpstream: op === "push" },
+			{
+				remote: "origin",
+				branch,
+				setUpstream: op === "push",
+				signal: controller.signal,
+			},
 			(line) => {
 				remoteProgress.textContent = (remoteProgress.textContent + line).slice(
 					-2000,
@@ -485,12 +495,17 @@ async function runRemote(op: "fetch" | "push" | "pull"): Promise<void> {
 		writeError.textContent = "";
 		await refreshStatus();
 	} catch (error) {
-		// Verbatim: auth failures, diverged pull, no upstream, hook output.
+		// Verbatim: auth failures, diverged pull, no upstream, hook output —
+		// or the kill from Cancel, reported as cancelled, not failed.
 		writeError.textContent = String(error);
-		remoteProgress.textContent = `${op} failed`;
+		remoteProgress.textContent = controller.signal.aborted
+			? `${op} cancelled`
+			: `${op} failed`;
 		await refreshStatus().catch(() => {});
 	} finally {
+		remoteController = null;
 		remoteOpRunning = false;
+		cancelBtn.disabled = true;
 		if (store.get().root) {
 			pushBtn.disabled = false;
 			pullBtn.disabled = false;
@@ -502,6 +517,7 @@ async function runRemote(op: "fetch" | "push" | "pull"): Promise<void> {
 pushBtn.addEventListener("click", () => void runRemote("push"));
 pullBtn.addEventListener("click", () => void runRemote("pull"));
 fetchBtn.addEventListener("click", () => void runRemote("fetch"));
+cancelBtn.addEventListener("click", () => remoteController?.abort());
 
 // ---- U6: history pane + branch operations ----
 const HISTORY_PAGE = 50;

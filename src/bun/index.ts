@@ -199,13 +199,19 @@ const rpc = BrowserView.defineRPC<PlatformRPCSchema>({
 				const controller = new AbortController();
 				remoteOps.set(opId, controller);
 				void platform
-					.gitRemote(root, op, { remote, branch, setUpstream }, (line) =>
-						send("gitRemoteLine", { opId, line }),
+					.gitRemote(
+						root,
+						op,
+						{ remote, branch, setUpstream, signal: controller.signal },
+						(line) => send("gitRemoteLine", { opId, line }),
 					)
 					.then(() => send("gitRemoteDone", { opId, ok: true, stderr: "" }))
 					.catch((error) =>
 						send("gitRemoteDone", { opId, ok: false, stderr: String(error) }),
-					);
+					)
+					.finally(() => {
+						remoteOps.delete(opId);
+					});
 				return { opId };
 			},
 			gitRemoteAbort: ({ opId }) => {

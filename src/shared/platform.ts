@@ -94,11 +94,18 @@ export interface Platform {
 		switchTo?: boolean,
 	): Promise<void>;
 	gitSwitchBranch(root: string, name: string): Promise<void>;
-	/** Fetch/push/pull with streamed progress; system credentials only. */
+	/** Fetch/push/pull with streamed progress; system credentials only.
+	 * Aborting `signal` kills the in-flight op (U7b); implementations that
+	 * cannot cancel (fake) ignore it. */
 	gitRemote(
 		root: string,
 		op: "fetch" | "push" | "pull",
-		options: { remote: string; branch?: string; setUpstream?: boolean },
+		options: {
+			remote: string;
+			branch?: string;
+			setUpstream?: boolean;
+			signal?: AbortSignal;
+		},
 		onLine?: (line: string) => void,
 	): Promise<{ ok: boolean; stderr: string }>;
 	// ---- Write paths (U5). All are explicit user actions; staging touches
