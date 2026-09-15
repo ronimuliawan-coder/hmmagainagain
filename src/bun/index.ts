@@ -9,6 +9,10 @@ import type { FsEventBatch, PlatformRPCSchema } from "../shared/platform";
 import { createGitAdapter, GitError } from "./git-adapter";
 import { createBunPlatform } from "./platform-bun";
 
+// U8b cold-start proxy: wall-clock origin for the startup markers below
+// ("started!" log and the webview first-frame marker share Date.now).
+const STARTUP_T0 = Date.now();
+
 const DEV_SERVER_PORT = 5173;
 const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}`;
 
@@ -315,4 +319,7 @@ if (process.env.SMOKE === "1") {
 	}, 5000);
 }
 
-console.log("hmmagainagain started!");
+const STARTUP_WALL = Date.now();
+console.log(
+	`hmmagainagain started! wall=${STARTUP_WALL} +${STARTUP_WALL - STARTUP_T0}ms`,
+);

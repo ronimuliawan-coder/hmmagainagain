@@ -51,10 +51,16 @@ launches from `build/<env>-linux-x64/hmmagainagain/bin/launcher`, which self-ext
   runs the NEW build; skipping this step silently tests a stale bundle.
 - SMOKE_STAGE / SMOKE_BRANCH flows mutate their target repository — point `SMOKE_ROOT`
   at a throwaway fixture only.
+- **Rebuild webview assets before testing UI changes:** the app serves `dist/`
+  (vite output), not `src/mainview/` — run `vite build` (or `hutch run dev`,
+  which chains it) after editing UI sources. `bun run dev` alone serves a
+  stale bundle with no warning (bitten 2026-09-15: missing remote bar).
 
 ## Known limitations
 
 - Branch protection unavailable (GitHub Free, private repo) — see
   [`GIT_WORKFLOW.md`](../GIT_WORKFLOW.md) for compensating controls.
-- Installer payload measured 34 MB at U0 vs the ≤ 20 MB budget — open watch-item owned by
-  U8 ([RON-301](https://linear.app/rons-space/issue/RON-301)).
+- Installer payload measured 34 MB at U0 vs the ≤ 20 MB budget — RESOLVED
+  2026-09-15 (U8/RON-301): re-measured 35.0 MB, bun runtime = 97% of payload;
+  owner-approved exception re-budgets installer to ≤ 40 MB, Cottontail
+  migration trigger-armed.
