@@ -206,4 +206,37 @@ describe("rpc platform gitRemote settling (U7a)", () => {
 			"transport down",
 		);
 	});
+
+	test("early done skips abort wiring for the finished op", async () => {
+		let release!: () => void;
+		harness.startGate = new Promise<void>((r) => {
+			release = r;
+		});
+		try {
+			const platform = getPlatform();
+			const controller = new AbortController();
+			const pending = platform.gitRemote(
+				"root",
+				"fetch",
+				{ remote: "origin", signal: controller.signal },
+				() => {},
+			);
+			void pending.catch(() => {});
+			await flush();
+			const opId = harness.nextOpId;
+			const abortsBefore = harness.abortCalls.length;
+			harness.messages.gitRemoteDone({ opId, ok: true, stderr: "early" });
+			release();
+			await expect(withHangGuard(pending, "gitRemote")).resolves.toEqual({
+				ok: true,
+				stderr: "early",
+			});
+			// A later abort must not ping the finished op.
+			controller.abort();
+			await flush();
+			expect(harness.abortCalls.length).toBe(abortsBefore);
+		} finally {
+			harness.startGate = null;
+		}
+	});
 });

@@ -58,7 +58,9 @@ export async function remoteOp(
 		let lineRest = "";
 		const emitLines = (text: string): void => {
 			lineRest += text;
-			const parts = lineRest.split("\n");
+			// Git progress uses \r as well as \n over pipes; split on both
+			// so \r-delimited updates never arrive glued together.
+			const parts = lineRest.split(/\r\n|\r|\n/);
 			lineRest = parts.pop() ?? "";
 			for (const line of parts) options.onLine?.(`${line}\n`);
 		};

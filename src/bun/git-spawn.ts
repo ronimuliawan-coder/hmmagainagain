@@ -25,20 +25,17 @@ export function assertSafeRef(value: string, what: string): void {
 	}
 }
 
-/** Decode collected stdout/stderr chunks: concatenate bytes FIRST, decode
- * once — per-chunk decoding corrupts multi-byte sequences split across pipe
- * reads (CodeRabbit U0–U8 review). */
+/** Decode collected stdout/stderr chunks: one streaming TextDecoder across
+ * the chunks preserves multi-byte sequences split over pipe reads, without
+ * a joined patch-sized byte buffer (CodeRabbit follow-up: 46 MB peak).
+ * Chunk order is preserved; the final decode() flushes the tail. */
 export function decodeChunks(chunks: Uint8Array[]): string {
-	if (chunks.length === 0) return "";
-	if (chunks.length === 1) return new TextDecoder().decode(chunks[0]);
-	const total = chunks.reduce((n, c) => n + c.length, 0);
-	const joined = new Uint8Array(total);
-	let offset = 0;
-	for (const c of chunks) {
-		joined.set(c, offset);
-		offset += c.length;
+	const decoder = new TextDecoder();
+	let output = "";
+	for (const chunk of chunks) {
+		output += decoder.decode(chunk, { stream: true });
 	}
-	return new TextDecoder().decode(joined);
+	return output + decoder.decode();
 }
 
 export interface SpawnGitOptions extends GitRunOptions {
