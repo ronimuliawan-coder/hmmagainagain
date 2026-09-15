@@ -84,6 +84,13 @@ export function createBunPlatform(): Platform {
 			return git.switchBranch(root, name);
 		},
 
+		gitRemote(root, op, options, onLine) {
+			return git.remoteOp(root, op, { ...options, onLine }).then(() => ({
+				ok: true,
+				stderr: "",
+			}));
+		},
+
 		stagePaths(root: string, paths: string[]) {
 			return git.stagePaths(root, paths);
 		},

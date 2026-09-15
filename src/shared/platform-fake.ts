@@ -239,6 +239,13 @@ export function buildFakeFixture() {
 			fakeBranch = name;
 			return Promise.resolve();
 		},
+		gitRemote: (root, op, _options, onLine) => {
+			if (root !== FAKE_REPO) {
+				return Promise.reject(new Error(`not a git repository: ${root}`));
+			}
+			onLine?.(`fake ${op}: everything up-to-date\n`);
+			return Promise.resolve({ ok: true, stderr: "" });
+		},
 		// ---- Write paths (U5): minimal index simulation for browser dev ----
 		stagePaths: (root, paths) => {
 			if (root !== FAKE_REPO) {

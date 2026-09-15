@@ -16,6 +16,8 @@ const platform = createBunPlatform();
 const git = createGitAdapter();
 let logSeq = 0;
 const logRuns = new Map<number, AbortController>();
+let remoteOpSeq = 0;
+const remoteOps = new Map<number, AbortController>();
 
 let mainWindow: BrowserWindow | null = null;
 let watchSeq = 0;
@@ -191,6 +193,24 @@ const rpc = BrowserView.defineRPC<PlatformRPCSchema>({
 				} catch (error) {
 					return Promise.resolve({ ok: false as const, error: String(error) });
 				}
+			},
+			gitRemoteStart: ({ root, op, remote, branch, setUpstream }) => {
+				const opId = ++remoteOpSeq;
+				const controller = new AbortController();
+				remoteOps.set(opId, controller);
+				void platform
+					.gitRemote(root, op, { remote, branch, setUpstream }, (line) =>
+						send("gitRemoteLine", { opId, line }),
+					)
+					.then(() => send("gitRemoteDone", { opId, ok: true, stderr: "" }))
+					.catch((error) =>
+						send("gitRemoteDone", { opId, ok: false, stderr: String(error) }),
+					);
+				return { opId };
+			},
+			gitRemoteAbort: ({ opId }) => {
+				remoteOps.get(opId)?.abort();
+				return { ok: true };
 			},
 			// Write paths (U5): ok=false carries git's stderr verbatim so the
 			// webview can display hook failures as-is.

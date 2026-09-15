@@ -34,6 +34,8 @@ export interface GitRunResult {
 	signal: string | null;
 	/** Full stderr, captured verbatim regardless of chunk callbacks. */
 	stderr: string;
+	/** Present when the caller asked for stdout collection (SpawnGitOptions). */
+	stdout?: string;
 }
 
 /** Range selection for a worktree diff; empty = index vs worktree. */
@@ -92,6 +94,13 @@ export interface Platform {
 		switchTo?: boolean,
 	): Promise<void>;
 	gitSwitchBranch(root: string, name: string): Promise<void>;
+	/** Fetch/push/pull with streamed progress; system credentials only. */
+	gitRemote(
+		root: string,
+		op: "fetch" | "push" | "pull",
+		options: { remote: string; branch?: string; setUpstream?: boolean },
+		onLine?: (line: string) => void,
+	): Promise<{ ok: boolean; stderr: string }>;
 	// ---- Write paths (U5). All are explicit user actions; staging touches
 	// only the index; commits run hooks and never bypass them. Failures carry
 	// git's stderr verbatim. ----
@@ -156,6 +165,17 @@ export type PlatformRPCSchema = {
 				params: { root: string; name: string };
 				response: { ok: boolean; error?: string };
 			};
+			gitRemoteStart: {
+				params: {
+					root: string;
+					op: "fetch" | "push" | "pull";
+					remote: string;
+					branch?: string;
+					setUpstream?: boolean;
+				};
+				response: { opId: number };
+			};
+			gitRemoteAbort: { params: { opId: number }; response: { ok: boolean } };
 			// Write paths (U5). ok=false carries git's stderr verbatim.
 			stagePaths: {
 				params: { root: string; paths: string[] };
@@ -197,6 +217,8 @@ export type PlatformRPCSchema = {
 			selfTestRun: { root: string; stage?: boolean; branch?: boolean };
 			gitLogCommit: { logId: number; commit: LogCommit };
 			gitLogDone: { logId: number; ok: boolean; count: number; error?: string };
+			gitRemoteLine: { opId: number; line: string };
+			gitRemoteDone: { opId: number; ok: boolean; stderr: string };
 		};
 	}>;
 };

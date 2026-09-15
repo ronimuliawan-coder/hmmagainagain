@@ -6,7 +6,6 @@
 
 import Electrobun from "electrobun/view";
 import type {
-	BranchInfo,
 	FsEventBatch,
 	GitDiffOptions,
 	GitRunOptions,
@@ -65,6 +64,16 @@ const logDone = new Map<
 		count: number;
 		error?: string;
 		resolve: (r: { count: number }) => void;
+		reject: (e: Error) => void;
+	}
+>();
+const remoteListeners = new Map<number, { onLine: (line: string) => void }>();
+const remoteDone = new Map<
+	number,
+	{
+		ok: boolean;
+		stderr: string;
+		resolve: (r: { ok: boolean; stderr: string }) => void;
 		reject: (e: Error) => void;
 	}
 >();
@@ -167,6 +176,22 @@ function ensureRpc(): RpcInstance {
 						logListeners.delete(msg.logId);
 						if (msg.ok) pending.resolve({ count: msg.count });
 						else pending.reject(new Error(msg.error ?? "git log failed"));
+					}
+				},
+				gitRemoteLine: (msg) => {
+					const listener = remoteListeners.get(msg.opId);
+					if (listener) listener.onLine(msg.line);
+				},
+				gitRemoteDone: (msg) => {
+					const pending = remoteDone.get(msg.opId);
+					if (pending) {
+						remoteDone.delete(msg.opId);
+						remoteListeners.delete(msg.opId);
+						if (msg.ok) {
+							pending.resolve({ ok: true, stderr: msg.stderr });
+						} else {
+							pending.reject(new Error(msg.stderr || "remote op failed"));
+						}
 					}
 				},
 				selfTestRun: ({ root, stage, branch }) => {
@@ -288,6 +313,28 @@ function createRpcPlatform(): Platform {
 		gitSwitchBranch: (root: string, name: string) =>
 			rpc.request.gitSwitchBranch({ root, name }).then((r) => {
 				if (!r.ok) throw new Error(r.error ?? "gitSwitchBranch failed");
+			}),
+
+		gitRemote: (root, op, options, onLine) =>
+			new Promise<{ ok: boolean; stderr: string }>((resolve, reject) => {
+				void (async () => {
+					const { opId } = await rpc.request.gitRemoteStart({
+						root,
+						op,
+						remote: options.remote,
+						branch: options.branch,
+						setUpstream: options.setUpstream,
+					});
+					remoteListeners.set(opId, { onLine: onLine ?? (() => {}) });
+					// A done packet may race the start response — buffered above.
+					const done = remoteDone.get(opId);
+					if (done) {
+						remoteDone.delete(opId);
+						remoteListeners.delete(opId);
+						if (done.ok) resolve({ ok: true, stderr: done.stderr });
+						else reject(new Error(done.stderr || "remote op failed"));
+					}
+				})();
 			}),
 
 		stagePaths: (root: string, paths: string[]) =>
