@@ -45,10 +45,12 @@ adapter-fetch)
 	dir="${1:?fixture dir required}"; repeats="${2:-3}"
 	profile
 	for i in $(seq 1 "$repeats"); do
-		bun -e "
+		# Pass the path via the environment, never interpolated into the
+		# generated JS source (a quote in $dir would break out of the string).
+		FIXTURE_DIR="$dir" bun -e "
 import { createGitAdapter } from '$REPO/src/bun/git-adapter';
 const t0 = Date.now();
-const r = await createGitAdapter().diff('$dir', {});
+const r = await createGitAdapter().diff(process.env.FIXTURE_DIR ?? '', {});
 console.log('run=$i bytes=' + r.patch.length + ' files=' + r.files.length + ' ms=' + (Date.now() - t0));
 "
 	done
