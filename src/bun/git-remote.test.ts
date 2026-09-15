@@ -166,4 +166,31 @@ describe("GitAdapter remote ops (golden)", () => {
 		);
 		expect(upstream.trim()).toBe("origin/feature/tracked");
 	});
+
+	test("unknown remote name fails verbatim and moves nothing", async () => {
+		const localBefore = await gitIn(workPath, "rev-parse", "main");
+		const remoteBefore = await remoteHeadOid();
+		const error = await adapter
+			.remoteOp(workPath, "push", { remote: "no-such-remote", branch: "main" })
+			.then(() => null)
+			.catch((e: unknown) => e as GitError);
+		expect(error).toBeInstanceOf(GitError);
+		expect(error?.stderr).toContain("no-such-remote");
+		expect(await gitIn(workPath, "rev-parse", "main")).toBe(localBefore);
+		expect(await remoteHeadOid()).toBe(remoteBefore);
+	});
+
+	test("pull of a nonexistent remote branch fails verbatim", async () => {
+		const secondBefore = await gitIn(secondPath, "rev-parse", "HEAD");
+		const error = await adapter
+			.remoteOp(secondPath, "pull", {
+				remote: "origin",
+				branch: "no-such-branch",
+			})
+			.then(() => null)
+			.catch((e: unknown) => e as GitError);
+		expect(error).toBeInstanceOf(GitError);
+		expect(error?.stderr).toContain("couldn't find remote ref");
+		expect(await gitIn(secondPath, "rev-parse", "HEAD")).toBe(secondBefore);
+	});
 });
