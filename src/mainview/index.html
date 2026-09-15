@@ -3,10 +3,73 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vanilla + Vite</title>
+    <title>hmmagainagain</title>
   </head>
   <body>
-    <div id="app"></div>
+    <header id="topbar">
+      <strong>hmmagainagain</strong>
+        <input id="repo-path" placeholder="/path/to/repository" list="recent-list" aria-label="Repository path" />
+        <datalist id="recent-list"></datalist>
+      <button id="open-btn" type="button">Open</button>
+      <span id="repo-info">no repository open</span>
+    </header>
+    <main id="shell">
+      <section id="tree-pane">
+        <h2>Worktree</h2>
+        <div id="tree-container"></div>
+      </section>
+      <section id="status-pane">
+        <h2>Changed files</h2>
+        <ul id="status-list"></ul>
+        <div id="remote-bar">
+          <button type="button" id="fetch-btn" disabled>Fetch</button>
+          <button type="button" id="pull-btn" disabled>Pull</button>
+          <button type="button" id="push-btn" disabled>Push</button>
+          <button type="button" id="cancel-btn" disabled>Cancel</button>
+        </div>
+        <pre id="remote-progress"></pre>
+        <div id="commit-box">
+          <pre id="write-error"></pre>
+          <textarea
+            id="commit-message"
+            placeholder="Commit message"
+            rows="3"
+          ></textarea>
+          <div id="commit-actions">
+            <span id="staged-count">0 staged</span>
+            <button type="button" id="commit-btn" disabled>Commit</button>
+          </div>
+        </div>
+      </section>
+      <section id="diff-pane">
+        <div id="diff-toolbar">
+          <button type="button" data-diff-range="worktree">Worktree</button>
+          <button type="button" data-diff-range="staged">Staged</button>
+          <button type="button" data-diff-range="head">HEAD</button>
+          <input id="diff-from" placeholder="from" aria-label="from commit" />
+          <input id="diff-to" placeholder="to" aria-label="to commit" />
+          <button type="button" id="diff-range-apply">Go</button>
+          <span id="diff-info"></span>
+          <button type="button" id="diff-style-unified">Unified</button>
+          <button type="button" id="diff-style-split">Split</button>
+          <button type="button" id="stage-selected-btn" disabled>
+            Stage selected
+          </button>
+        </div>
+        <div id="diff-container"></div>
+      </section>
+      <section id="history-pane">
+        <h2>Branches</h2>
+        <select id="branch-select" aria-label="current branch"></select>
+        <div id="branch-create-row">
+          <input id="branch-name" placeholder="new-branch-name" aria-label="New branch name" />
+          <button type="button" id="branch-create-btn">Create</button>
+        </div>
+        <h2>History</h2>
+        <ul id="history-list"></ul>
+        <button type="button" id="older-btn" hidden>Older</button>
+      </section>
+    </main>
     <script type="module" src="/main.ts"></script>
   </body>
 </html>

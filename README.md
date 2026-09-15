@@ -19,8 +19,12 @@ Decision record: [docs/decisions/ADR-0001-stack.md](docs/decisions/ADR-0001-stac
 |---|---|
 | `src/bun/` | Main process (Bun): window shell now; GitAdapter + fs watcher from U1/U2 |
 | `src/mainview/` | Webview UI (vanilla TS + Vite): repo tree, status, diff views |
+| `docs/GOVERNANCE.md` | Authority order, unit gates, ownership map |
+| `docs/GIT_WORKFLOW.md` | Branch/merge rules and invariants |
+| `docs/runbooks/` | Recovery + GitLab replica runbooks |
 | `docs/decisions/` | Architecture decision records |
-| `CLAUDE.md` | Binding engineering rules (constitution) |
+| `.claude/PRPs/` | Approved PRD (`prds/`) and unit plans (`plans/`) |
+| `AGENTS.md` | Binding agent rules (constitution) |
 | `electrobun.config.ts` / `hutch.config.ts` | Build/toolchain configuration (version pins) |
 
 ## Commands
