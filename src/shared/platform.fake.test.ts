@@ -53,4 +53,97 @@ describe("fake platform Git simulation", () => {
 		expect(subjects).toEqual(["fake: first commit"]);
 		expect(result).toEqual({ count: 1 });
 	});
+
+	test("branch mutations update only their own fixture", async () => {
+		const first = buildFakeFixture();
+		const second = buildFakeFixture();
+
+		await first.platform.gitCreateBranch(
+			first.fixture.repoRoot,
+			"feature/not-current",
+			false,
+		);
+		expect(await first.platform.gitBranches(first.fixture.repoRoot)).toEqual([
+			{ name: "main", oid: "f4k3c02", current: true },
+		]);
+
+		await first.platform.gitCreateBranch(
+			first.fixture.repoRoot,
+			"feature/current",
+			true,
+		);
+		expect(await first.platform.gitBranches(first.fixture.repoRoot)).toEqual([
+			{ name: "feature/current", oid: "f4k3c02", current: true },
+		]);
+		await first.platform.gitSwitchBranch(
+			first.fixture.repoRoot,
+			"fix/switched",
+		);
+		expect(await first.platform.gitBranches(first.fixture.repoRoot)).toEqual([
+			{ name: "fix/switched", oid: "f4k3c02", current: true },
+		]);
+		expect(await second.platform.gitBranches(second.fixture.repoRoot)).toEqual([
+			{ name: "main", oid: "f4k3c02", current: true },
+		]);
+	});
+
+	test("stage, unstage, and commit keep index and head state coherent", async () => {
+		const { platform, fixture } = buildFakeFixture();
+		const originalHead = (await platform.gitStatus(fixture.repoRoot)).branch
+			.oid;
+
+		await platform.unstagePaths(fixture.repoRoot, [fixture.trackedFile]);
+		expect(
+			(await platform.gitStatus(fixture.repoRoot)).entries[0],
+		).toMatchObject({ indexStatus: ".", worktreeStatus: "M" });
+		await platform.applyIndexPatch(fixture.repoRoot, "fixture patch");
+		expect(
+			(await platform.gitStatus(fixture.repoRoot)).entries[0],
+		).toMatchObject({ indexStatus: ".", worktreeStatus: "M" });
+		await expect(
+			platform.commit(fixture.repoRoot, "nothing staged"),
+		).rejects.toThrow("no changes added to commit (fake)");
+
+		await platform.stagePaths(fixture.repoRoot, [fixture.trackedFile]);
+		expect(
+			(await platform.gitStatus(fixture.repoRoot)).entries[0],
+		).toMatchObject({ indexStatus: "M", worktreeStatus: "." });
+		await platform.commit(fixture.repoRoot, "test commit");
+
+		const committed = await platform.gitStatus(fixture.repoRoot);
+		expect(committed.branch.oid).not.toBe(originalHead);
+		expect(committed.entries[0]).toMatchObject({
+			indexStatus: ".",
+			worktreeStatus: "M",
+		});
+	});
+
+	test("remote operations stream progress and reject non-repositories", async () => {
+		const { platform, fixture } = buildFakeFixture();
+		const lines: string[] = [];
+
+		expect(
+			await platform.gitRemote(
+				fixture.repoRoot,
+				"fetch",
+				{ remote: "origin" },
+				(line) => lines.push(line),
+			),
+		).toEqual({ ok: true, stderr: "" });
+		expect(lines).toEqual(["fake fetch: everything up-to-date\n"]);
+		await expect(
+			platform.gitRemote(fixture.nonRepoRoot, "fetch", { remote: "origin" }),
+		).rejects.toThrow(`not a git repository: ${fixture.nonRepoRoot}`);
+	});
+
+	test("unsupported commands return a diagnostic failure", async () => {
+		const { platform, fixture } = buildFakeFixture();
+		const result = await platform.runGit(fixture.repoRoot, ["unsupported"]);
+
+		expect(result).toEqual({
+			code: 1,
+			signal: null,
+			stderr: "fake: unsupported command",
+		});
+	});
 });
