@@ -15,6 +15,10 @@ const harness = {
 	nextOpId: 0,
 	nextLogId: 0,
 	abortCalls: [] as number[],
+	/** When set, start requests wait for this gate (early-packet tests). */
+	startGate: null as Promise<void> | null,
+	/** When true, the next start request rejects (start-failure tests). */
+	failNextStart: false,
 };
 
 // Function object: `new`-able for `new Electrobun.Electroview(...)` in
@@ -26,7 +30,15 @@ const FakeElectroview = Object.assign(
 			harness.messages = config.handlers.messages;
 			return {
 				request: {
-					gitRemoteStart: async () => ({ opId: ++harness.nextOpId }),
+					gitRemoteStart: async () => {
+						if (harness.failNextStart) {
+							harness.failNextStart = false;
+							throw new Error("transport down");
+						}
+						const opId = ++harness.nextOpId;
+						await harness.startGate;
+						return { opId };
+					},
 					gitRemoteAbort: async (params: { opId: number }) => {
 						harness.abortCalls.push(params.opId);
 						return { ok: true };
@@ -156,5 +168,42 @@ describe("rpc platform gitRemote settling (U7a)", () => {
 			count: 2,
 		});
 		expect(seen).toHaveLength(2);
+	});
+
+	test("done packet that beats the start response still settles", async () => {
+		// The start request parks on a gate; the done packet arrives first
+		// and must buffer by op id instead of being dropped.
+		let release!: () => void;
+		harness.startGate = new Promise<void>((r) => {
+			release = r;
+		});
+		try {
+			const platform = getPlatform();
+			const pending = platform.gitRemote("root", "fetch", {
+				remote: "origin",
+			});
+			void pending.catch(() => {});
+			await flush();
+			const opId = harness.nextOpId;
+			harness.messages.gitRemoteDone({ opId, ok: true, stderr: "early" });
+			release();
+			await expect(withHangGuard(pending, "gitRemote")).resolves.toEqual({
+				ok: true,
+				stderr: "early",
+			});
+		} finally {
+			harness.startGate = null;
+		}
+	});
+
+	test("rejected start settles instead of hanging", async () => {
+		harness.failNextStart = true;
+		const platform = getPlatform();
+		const pending = platform.gitRemote("root", "fetch", {
+			remote: "origin",
+		});
+		await expect(withHangGuard(pending, "gitRemote")).rejects.toThrow(
+			"transport down",
+		);
 	});
 });

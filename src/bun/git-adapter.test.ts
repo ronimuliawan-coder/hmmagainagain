@@ -22,6 +22,10 @@ const FIXTURE_ENV = {
 	GIT_AUTHOR_EMAIL: "golden@fixture.test",
 	GIT_COMMITTER_NAME: "Golden Fixture",
 	GIT_COMMITTER_EMAIL: "golden@fixture.test",
+	// Hermetic goldens: ignore the machine's global/system git config
+	// (autocrlf, hooksPath, renames…), which would change asserted output.
+	GIT_CONFIG_GLOBAL: "/dev/null",
+	GIT_CONFIG_SYSTEM: "/dev/null",
 };
 
 async function git(...args: string[]): Promise<void> {

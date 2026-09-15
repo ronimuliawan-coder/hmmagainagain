@@ -98,15 +98,12 @@ export function parseStatusV2(raw: string): GitStatus {
 			// 2 XY sub mH mI mW hH hI X<score> path NUL origPath
 			const pathStart = spaceIndexAfter(record, 9);
 			const entry = changedEntry(record, pathStart, "changed");
-			// The original path is the next NUL-separated record.
+			// Porcelain v2 guarantees exactly one record holding the original
+			// path after a rename/copy header — consume it unconditionally.
+			// (Heuristic prefix checks here rejected legitimate original
+			// paths such as "? notes.txt"; CodeRabbit U0–U8 review.)
 			const orig = records[i + 1];
-			if (
-				orig !== undefined &&
-				!orig.startsWith("#") &&
-				!/^[12u] /.test(orig) &&
-				!orig.startsWith("? ") &&
-				!orig.startsWith("! ")
-			) {
+			if (orig !== undefined) {
 				entry.renamedFrom = orig;
 				i += 1; // consume the origPath record
 			}
@@ -115,9 +112,10 @@ export function parseStatusV2(raw: string): GitStatus {
 		}
 
 		if (record.startsWith("u ")) {
-			// u XY sub m1 m2 m3 mW h1 h2 h3 path → 9 spaces before the path.
+			// u XY sub m1 m2 m3 mW h1 h2 h3 path → 10 spaces before the path
+			// (verified against real conflict output; was 9).
 			entries.push(
-				changedEntry(record, spaceIndexAfter(record, 9), "unmerged"),
+				changedEntry(record, spaceIndexAfter(record, 10), "unmerged"),
 			);
 		}
 

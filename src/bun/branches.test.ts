@@ -24,6 +24,9 @@ const FIXTURE_ENV = {
 	GIT_AUTHOR_EMAIL: "golden@fixture.test",
 	GIT_COMMITTER_NAME: "Golden Fixture",
 	GIT_COMMITTER_EMAIL: "golden@fixture.test",
+	// Hermetic goldens: ignore the machine's global/system git config.
+	GIT_CONFIG_GLOBAL: "/dev/null",
+	GIT_CONFIG_SYSTEM: "/dev/null",
 };
 
 async function git(...args: string[]): Promise<void> {
@@ -70,6 +73,21 @@ describe("GitAdapter.branches (golden)", () => {
 
 	test("empty branch name is rejected before git runs", async () => {
 		await expect(adapter.createBranch(repo, "   ")).rejects.toThrow(/empty/);
+	});
+
+	test("leading-dash names are rejected before git runs (CWE-88)", async () => {
+		// Ref-like positions parse as flags; no `--` separator exists there.
+		const before = (await adapter.branches(repo)).find((b) => b.current)?.name;
+		await expect(
+			adapter.createBranch(repo, "--upload-pack=evil"),
+		).rejects.toThrow(/must not start with/);
+		await expect(adapter.switchBranch(repo, "--help")).rejects.toThrow(
+			/must not start with/,
+		);
+		// Ref unchanged by the refusals.
+		expect((await adapter.branches(repo)).find((b) => b.current)?.name).toBe(
+			before,
+		);
 	});
 });
 

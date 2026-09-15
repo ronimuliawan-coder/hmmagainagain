@@ -45,6 +45,9 @@ const chunkText = "const value = 1; // diff budget fixture line\n".repeat(
 );
 let contents = "";
 for (let i = 0; i < Math.ceil(lineCount / 10_000); i++) contents += chunkText;
-writeFileSync(join(target, "big.txt"), contents);
+// ceil() overshoots for non-multiples of 10 000 — truncate to exactly
+// lineCount lines so the budget number is honest (CodeRabbit U0–U8 review).
+const exact = contents.split("\n").slice(0, lineCount).join("\n");
+writeFileSync(join(target, "big.txt"), `${exact}\n`);
 
 console.log(`fixture ready: ${target} (~${lineCount} changed lines)`);

@@ -7,7 +7,7 @@
 //   { from: "a", to: "b" }           → git diff a b               (commit vs commit)
 //   {}                               → git diff                   (index vs worktree)
 
-import { spawnGit } from "../git-spawn";
+import { decodeChunks, spawnGit } from "../git-spawn";
 
 export interface DiffFile {
 	path: string;
@@ -48,7 +48,7 @@ async function collectText(root: string, args: string[]): Promise<string> {
 	if (result.code !== 0) {
 		throw new Error(`git ${args[0]} failed: ${result.stderr}`);
 	}
-	return chunks.map((c) => new TextDecoder().decode(c)).join("");
+	return decodeChunks(chunks);
 }
 
 function parseNumstat(raw: string): DiffFile[] {

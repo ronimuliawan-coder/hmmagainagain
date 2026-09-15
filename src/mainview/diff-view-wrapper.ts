@@ -67,20 +67,30 @@ export function mountDiffView(
 	});
 
 	let style: DiffStyle = "unified";
+	// Shared by construction and setDiffStyle: setOptions REPLACES
+	// (CodeView.js: `this.options = options`), so both call sites must
+	// supply the selection keys or line selection silently dies after any
+	// style switch (CodeRabbit U0–U8 review).
+	const handleSelection = (
+		selection: {
+			id: string;
+			range: { start: number; end: number };
+		} | null,
+	) => {
+		if (!selection) return;
+		onSelectionChange?.({
+			id: selection.id,
+			start: selection.range.start,
+			end: selection.range.end,
+		});
+	};
 	const viewer = new CodeView(
 		{
 			theme: { ...THEME },
 			diffStyle: style,
 			stickyHeaders: true,
 			enableLineSelection: true,
-			onSelectedLinesChange: (selection) => {
-				if (!selection) return;
-				onSelectionChange?.({
-					id: selection.id,
-					start: selection.range.start,
-					end: selection.range.end,
-				});
-			},
+			onSelectedLinesChange: handleSelection,
 		},
 		pool,
 	);
@@ -101,6 +111,8 @@ export function mountDiffView(
 				theme: { ...THEME },
 				diffStyle: style,
 				stickyHeaders: true,
+				enableLineSelection: true,
+				onSelectedLinesChange: handleSelection,
 			});
 			viewer.render(true);
 		},

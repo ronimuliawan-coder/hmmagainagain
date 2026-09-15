@@ -5,6 +5,13 @@
 
 import { type FileSink, spawn } from "bun";
 
+// Deliberate exception to the "spawnGit is the only spawner" invariant:
+// the batch protocol needs one LONG-LIVED process with an interactive
+// stdin/stdout dialogue, which one-shot spawnGit cannot express. Flag
+// injection does not apply here: the argv is a constant and lookup specs
+// travel over stdin, where git parses them as object names (unknown specs
+// surface as missing/error, never as flags).
+
 export interface CatFileObject {
 	oid: string;
 	type: string;
@@ -98,6 +105,16 @@ export class CatFileSession {
 				}
 				const [oid, type, sizeRaw] = parts;
 				const size = Number(sizeRaw);
+				// A malformed batch header must fail just this request, not
+				// resolve a bogus object or poison the whole queue (CodeRabbit
+				// U0–U8 review). The batch protocol is stable, so any deviation
+				// is a bug worth surfacing verbatim.
+				if (parts.length !== 3 || !Number.isInteger(size) || size < 0) {
+					const request = this.queue[0];
+					this.advance();
+					request?.reject(new Error(`malformed cat-file header: ${header}`));
+					continue;
+				}
 				const data = await this.readExact(size);
 				await this.readExact(1); // trailing newline after the object body
 				const request = this.queue[0];

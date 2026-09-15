@@ -48,7 +48,9 @@ const rpc = BrowserView.defineRPC<PlatformRPCSchema>({
 	handlers: {
 		requests: {
 			readRepo: ({ root }) => {
-				console.log("[DBG] readRepo handler reached");
+				if (process.env.SMOKE === "1") {
+					console.log("[DBG] readRepo handler reached");
+				}
 				return platform.readRepo(root);
 			},
 			watchStart: ({ root }) => {
@@ -94,6 +96,18 @@ const rpc = BrowserView.defineRPC<PlatformRPCSchema>({
 							signal: result.signal,
 							stderr: result.stderr,
 						});
+					})
+					.catch((error: unknown) => {
+						// Spawn/abort failures must still complete the run on
+						// the webview side (CodeRabbit U0–U8 review).
+						send("gitExit", {
+							runId,
+							code: null,
+							signal: null,
+							stderr: String(error),
+						});
+					})
+					.finally(() => {
 						runs.delete(runId);
 					});
 				return { runId };
@@ -103,12 +117,20 @@ const rpc = BrowserView.defineRPC<PlatformRPCSchema>({
 				return { ok: true };
 			},
 			gitStatus: ({ root }) => {
-				console.log("[DBG] gitStatus handler reached");
+				if (process.env.SMOKE === "1") {
+					console.log("[DBG] gitStatus handler reached");
+				}
 				try {
-					// Adapter throws GitError on failure; bridge it into ok/error.
+					// Adapter rejects with GitError on failure; bridge async
+					// rejections into ok/error too (the sync catch below only
+					// covers synchronous throws). CodeRabbit U0–U8 review.
 					return git
 						.status(root)
-						.then((status) => ({ ok: true as const, status }));
+						.then((status) => ({ ok: true as const, status }))
+						.catch((error: unknown) => ({
+							ok: false as const,
+							error: String(error),
+						}));
 				} catch (error) {
 					return Promise.resolve({ ok: false as const, error: String(error) });
 				}
@@ -155,7 +177,10 @@ const rpc = BrowserView.defineRPC<PlatformRPCSchema>({
 							count: 0,
 							error: String(error),
 						}),
-					);
+					)
+					.finally(() => {
+						logRuns.delete(logId);
+					});
 				return { logId };
 			},
 			gitLogAbort: ({ logId }) => {
@@ -166,7 +191,11 @@ const rpc = BrowserView.defineRPC<PlatformRPCSchema>({
 				try {
 					return git
 						.worktreePaths(root)
-						.then((paths) => ({ ok: true as const, paths }));
+						.then((paths) => ({ ok: true as const, paths }))
+						.catch((error: unknown) => ({
+							ok: false as const,
+							error: String(error),
+						}));
 				} catch (error) {
 					return Promise.resolve({ ok: false as const, error: String(error) });
 				}
@@ -175,7 +204,11 @@ const rpc = BrowserView.defineRPC<PlatformRPCSchema>({
 				try {
 					return git
 						.branches(root)
-						.then((branches) => ({ ok: true as const, branches }));
+						.then((branches) => ({ ok: true as const, branches }))
+						.catch((error: unknown) => ({
+							ok: false as const,
+							error: String(error),
+						}));
 				} catch (error) {
 					return Promise.resolve({ ok: false as const, error: String(error) });
 				}
@@ -184,7 +217,11 @@ const rpc = BrowserView.defineRPC<PlatformRPCSchema>({
 				try {
 					return git
 						.createBranch(root, name, { switchTo })
-						.then(() => ({ ok: true as const }));
+						.then(() => ({ ok: true as const }))
+						.catch((error: unknown) => ({
+							ok: false as const,
+							error: String(error),
+						}));
 				} catch (error) {
 					return Promise.resolve({ ok: false as const, error: String(error) });
 				}
@@ -193,7 +230,11 @@ const rpc = BrowserView.defineRPC<PlatformRPCSchema>({
 				try {
 					return git
 						.switchBranch(root, name)
-						.then(() => ({ ok: true as const }));
+						.then(() => ({ ok: true as const }))
+						.catch((error: unknown) => ({
+							ok: false as const,
+							error: String(error),
+						}));
 				} catch (error) {
 					return Promise.resolve({ ok: false as const, error: String(error) });
 				}

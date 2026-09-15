@@ -61,6 +61,13 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          # `git` ignores GITHUB_TOKEN in the environment, and
+          # `persist-credentials: false` left `origin` unauthenticated — so
+          # every remote operation below addresses this authenticated URL.
+          # (CodeRabbit finding on the U0–U8 promotion review; without it the
+          # sync fails on this private repository.)
+          auth_remote="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
           max_attempts=3
           master_sha="$(git rev-parse refs/remotes/origin/master)"
           echo "master: $master_sha"
@@ -72,9 +79,9 @@ jobs:
 
             # `dev` is recreated from `master` if it is missing, which is the
             # correct starting state for the next batch.
-            if ! git ls-remote --exit-code --heads origin dev >/dev/null 2>&1; then
+            if ! git ls-remote --exit-code --heads "$auth_remote" dev >/dev/null 2>&1; then
               echo "Branch \`dev\` does not exist; creating it at master ($master_sha)."
-              if git push origin "$master_sha:refs/heads/dev"; then
+              if git push "$auth_remote" "$master_sha:refs/heads/dev"; then
                 echo "Created \`dev\` at \`$master_sha\`." >> "$GITHUB_STEP_SUMMARY"
                 exit 0
               fi
@@ -82,7 +89,7 @@ jobs:
               continue
             fi
 
-            git fetch --quiet origin dev
+            git fetch --quiet "$auth_remote" dev
             dev_sha="$(git rev-parse FETCH_HEAD)"
             echo "dev:    $dev_sha"
 
@@ -96,7 +103,7 @@ jobs:
             if git merge-base --is-ancestor "$dev_sha" "$master_sha"; then
               behind="$(git rev-list --count "$dev_sha..$master_sha")"
               echo "dev is $behind commit(s) behind master; fast-forwarding."
-              if git push origin "$master_sha:refs/heads/dev"; then
+              if git push "$auth_remote" "$master_sha:refs/heads/dev"; then
                 {
                   echo "Fast-forwarded \`dev\` $behind commit(s) to \`$master_sha\`."
                   echo ""
@@ -155,7 +162,7 @@ jobs:
 
             merged_sha="$(git rev-parse HEAD)"
             echo "Merged cleanly as $merged_sha; pushing to dev."
-            if git push origin "$merged_sha:refs/heads/dev"; then
+            if git push "$auth_remote" "$merged_sha:refs/heads/dev"; then
               {
                 echo "\`dev\` had $ahead commit(s) \`master\` did not, so it could not"
                 echo "be fast-forwarded. Merged \`master\` into it as \`$merged_sha\`."

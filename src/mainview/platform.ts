@@ -77,6 +77,14 @@ const remoteDone = new Map<
 		reject: (e: Error) => void;
 	}
 >();
+/** Early done packets, keyed by id (U7a residual, CodeRabbit U0–U8 review):
+ * a done packet may beat its start response; buffer and drain on attach,
+ * mirroring pendingExits. */
+const pendingLogDone = new Map<
+	number,
+	{ ok: boolean; count: number; error?: string }
+>();
+const pendingRemoteDone = new Map<number, { ok: boolean; stderr: string }>();
 /** Abort-listener cleanups, keyed by op id (U7b). */
 const remoteAbortCleanups = new Map<number, () => void>();
 
@@ -173,12 +181,14 @@ function ensureRpc(): RpcInstance {
 				},
 				gitLogDone: (msg) => {
 					const pending = logDone.get(msg.logId);
-					if (pending) {
-						logDone.delete(msg.logId);
-						logListeners.delete(msg.logId);
-						if (msg.ok) pending.resolve({ count: msg.count });
-						else pending.reject(new Error(msg.error ?? "git log failed"));
+					if (!pending) {
+						pendingLogDone.set(msg.logId, msg);
+						return;
 					}
+					logDone.delete(msg.logId);
+					logListeners.delete(msg.logId);
+					if (msg.ok) pending.resolve({ count: msg.count });
+					else pending.reject(new Error(msg.error ?? "git log failed"));
 				},
 				gitRemoteLine: (msg) => {
 					const listener = remoteListeners.get(msg.opId);
@@ -186,16 +196,18 @@ function ensureRpc(): RpcInstance {
 				},
 				gitRemoteDone: (msg) => {
 					const pending = remoteDone.get(msg.opId);
-					if (pending) {
-						remoteDone.delete(msg.opId);
-						remoteListeners.delete(msg.opId);
-						remoteAbortCleanups.get(msg.opId)?.();
-						remoteAbortCleanups.delete(msg.opId);
-						if (msg.ok) {
-							pending.resolve({ ok: true, stderr: msg.stderr });
-						} else {
-							pending.reject(new Error(msg.stderr || "remote op failed"));
-						}
+					if (!pending) {
+						pendingRemoteDone.set(msg.opId, msg);
+						return;
+					}
+					remoteDone.delete(msg.opId);
+					remoteListeners.delete(msg.opId);
+					remoteAbortCleanups.get(msg.opId)?.();
+					remoteAbortCleanups.delete(msg.opId);
+					if (msg.ok) {
+						pending.resolve({ ok: true, stderr: msg.stderr });
+					} else {
+						pending.reject(new Error(msg.stderr || "remote op failed"));
 					}
 				},
 				selfTestRun: ({ root, stage, branch }) => {
@@ -231,12 +243,19 @@ function createRpcPlatform(): Platform {
 			args: string[],
 			opts?: GitRunOptions,
 		): Promise<GitRunResult> =>
-			new Promise<GitRunResult>((resolve) => {
+			new Promise<GitRunResult>((resolve, reject) => {
 				// The server runId attaches the buffered/remote state to this promise.
 				const state: RunState = { resolve, opts: opts ?? {}, stderr: "" };
 				void (async () => {
-					const { runId } = await rpc.request.runGitStart({ root, args });
-					attachRun(runId, state);
+					try {
+						const { runId } = await rpc.request.runGitStart({ root, args });
+						attachRun(runId, state);
+					} catch (error) {
+						// A rejected start (timeout, transport, main-side throw)
+						// must settle this promise, not hang it (CodeRabbit
+						// U0–U8 review).
+						reject(error instanceof Error ? error : new Error(String(error)));
+					}
 				})();
 			}),
 
@@ -279,24 +298,39 @@ function createRpcPlatform(): Platform {
 		gitLog: (root, options, onCommit) =>
 			new Promise<{ count: number }>((resolve, reject) => {
 				void (async () => {
-					const { logId } = await rpc.request.gitLogStart({
-						root,
-						limit: options?.limit,
-						skip: options?.skip,
-						range: options?.range,
-					});
-					// Attach after the start response; early commits buffer by id.
-					const early = pendingLogCommits.get(logId);
-					if (early) {
-						for (const commit of early) onCommit(commit);
-						pendingLogCommits.delete(logId);
+					try {
+						const { logId } = await rpc.request.gitLogStart({
+							root,
+							limit: options?.limit,
+							skip: options?.skip,
+							range: options?.range,
+						});
+						// Attach after the start response; early commits buffer by id.
+						const early = pendingLogCommits.get(logId);
+						if (early) {
+							for (const commit of early) onCommit(commit);
+							pendingLogCommits.delete(logId);
+						}
+						logListeners.set(logId, { onCommit, resolve, reject });
+						// Same defect class as U7a: the done handler reads logDone, so
+						// the settler must be registered there — otherwise only rows
+						// stream and the history promise never settles (Older-button
+						// state never updates). A done packet that beat the start
+						// response waits in pendingLogDone and drains here.
+						logDone.set(logId, { ok: false, count: 0, resolve, reject });
+						// Drain a done packet that beat the start response.
+						const earlyDone = pendingLogDone.get(logId);
+						if (earlyDone) {
+							pendingLogDone.delete(logId);
+							logDone.delete(logId);
+							logListeners.delete(logId);
+							if (earlyDone.ok) resolve({ count: earlyDone.count });
+							else reject(new Error(earlyDone.error ?? "git log failed"));
+						}
+					} catch (error) {
+						// A rejected start must settle this promise, not hang it.
+						reject(error instanceof Error ? error : new Error(String(error)));
 					}
-					logListeners.set(logId, { onCommit, resolve, reject });
-					// Same defect class as U7a: the done handler reads logDone, so
-					// the settler must be registered there — otherwise only rows
-					// stream and the history promise never settles (Older-button
-					// state never updates). No early-done buffer exists either.
-					logDone.set(logId, { ok: false, count: 0, resolve, reject });
 				})();
 			}),
 
@@ -320,35 +354,50 @@ function createRpcPlatform(): Platform {
 		gitRemote: (root, op, options, onLine) =>
 			new Promise<{ ok: boolean; stderr: string }>((resolve, reject) => {
 				void (async () => {
-					const { opId } = await rpc.request.gitRemoteStart({
-						root,
-						op,
-						remote: options.remote,
-						branch: options.branch,
-						setUpstream: options.setUpstream,
-					});
-					remoteListeners.set(opId, { onLine: onLine ?? (() => {}) });
-					// Register the settler in the map the done handler reads —
-					// without this the packet is dropped and this promise hangs
-					// forever (U7a). No early-done buffer exists on this path,
-					// so there is no early packet to drain here.
-					remoteDone.set(opId, { ok: false, stderr: "", resolve, reject });
-					// Cancellation (U7b): forward the caller's abort to the
-					// server, which kills the child via its own controller.
-					if (options.signal) {
-						const signal = options.signal;
-						const onAbort = () => {
-							remoteAbortCleanups.delete(opId);
-							void rpc.request.gitRemoteAbort({ opId });
-						};
-						if (signal.aborted) {
-							onAbort();
-						} else {
-							remoteAbortCleanups.set(opId, () =>
-								signal.removeEventListener("abort", onAbort),
-							);
-							signal.addEventListener("abort", onAbort, { once: true });
+					try {
+						const { opId } = await rpc.request.gitRemoteStart({
+							root,
+							op,
+							remote: options.remote,
+							branch: options.branch,
+							setUpstream: options.setUpstream,
+						});
+						remoteListeners.set(opId, { onLine: onLine ?? (() => {}) });
+						// Register the settler in the map the done handler reads —
+						// without this the packet is dropped and this promise hangs
+						// forever (U7a). A done packet that beat the start response
+						// waits in pendingRemoteDone and drains here.
+						remoteDone.set(opId, { ok: false, stderr: "", resolve, reject });
+						const earlyDone = pendingRemoteDone.get(opId);
+						if (earlyDone) {
+							pendingRemoteDone.delete(opId);
+							remoteDone.delete(opId);
+							remoteListeners.delete(opId);
+							if (earlyDone.ok) resolve({ ok: true, stderr: earlyDone.stderr });
+							else reject(new Error(earlyDone.stderr || "remote op failed"));
 						}
+						// Cancellation (U7b): forward the caller's abort to the
+						// server, which kills the child via its own controller.
+						if (options.signal) {
+							const signal = options.signal;
+							const onAbort = () => {
+								remoteAbortCleanups.delete(opId);
+								void rpc.request.gitRemoteAbort({ opId });
+							};
+							if (signal.aborted) {
+								onAbort();
+							} else {
+								remoteAbortCleanups.set(opId, () =>
+									signal.removeEventListener("abort", onAbort),
+								);
+								signal.addEventListener("abort", onAbort, { once: true });
+							}
+						}
+					} catch (error) {
+						// A rejected start must settle this promise: without it
+						// runRemote's finally never runs and the remote buttons
+						// stay disabled until reload.
+						reject(error instanceof Error ? error : new Error(String(error)));
 					}
 				})();
 			}),

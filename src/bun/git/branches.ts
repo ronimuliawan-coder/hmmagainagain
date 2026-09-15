@@ -4,7 +4,7 @@
 // implicitly. Untracked-file conflicts (target branch has the same path) are
 // git's own error, surfaced verbatim.
 
-import { spawnGit } from "../git-spawn";
+import { assertSafeRef, decodeChunks, spawnGit } from "../git-spawn";
 import { GitError } from "./git-error";
 import { parseStatusV2 } from "./status-parser";
 import { enqueueWrite } from "./write-queue";
@@ -42,9 +42,7 @@ export async function assertCleanWorktree(root: string): Promise<void> {
 			result.code,
 		);
 	}
-	const status = parseStatusV2(
-		chunks.map((c) => new TextDecoder().decode(c)).join(""),
-	);
+	const status = parseStatusV2(decodeChunks(chunks));
 	if (status.entries.length > 0) {
 		throw new GitError(
 			`refusing to switch branches: the worktree has ${status.entries.length} change(s) (commit them first — nothing is auto-discarded)`,
@@ -74,7 +72,7 @@ export async function branches(root: string): Promise<BranchInfo[]> {
 			result.code,
 		);
 	}
-	const raw = chunks.map((c) => new TextDecoder().decode(c)).join("");
+	const raw = decodeChunks(chunks);
 	const out: BranchInfo[] = [];
 	for (const line of raw.split("\n")) {
 		if (line.length === 0) continue;
@@ -98,6 +96,12 @@ export async function createBranch(
 	if (name.trim().length === 0) {
 		throw new GitError("branch name is empty", "", null);
 	}
+	// Refuse leading-dash names/points before argv construction (CWE-88):
+	// they sit in flag-parsable positions (`switch -c <name>`, refspecs).
+	assertSafeRef(name, "branch name");
+	if (options.startPoint !== undefined) {
+		assertSafeRef(options.startPoint, "start point");
+	}
 	await enqueueWrite(async () => {
 		if (options.switchTo) {
 			await assertCleanWorktree(root);
@@ -111,6 +115,7 @@ export async function createBranch(
 }
 
 export async function switchBranch(root: string, name: string): Promise<void> {
+	assertSafeRef(name, "branch name");
 	await enqueueWrite(async () => {
 		await assertCleanWorktree(root);
 		await runWrite(root, ["switch", name]);
