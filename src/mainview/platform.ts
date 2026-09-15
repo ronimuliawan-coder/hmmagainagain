@@ -288,13 +288,11 @@ function createRpcPlatform(): Platform {
 						pendingLogCommits.delete(logId);
 					}
 					logListeners.set(logId, { onCommit, resolve, reject });
-					const done = logDone.get(logId);
-					if (done) {
-						logDone.delete(logId);
-						logListeners.delete(logId);
-						if (done.ok) resolve({ count: done.count });
-						else reject(new Error(done.error ?? "git log failed"));
-					}
+					// Same defect class as U7a: the done handler reads logDone, so
+					// the settler must be registered there — otherwise only rows
+					// stream and the history promise never settles (Older-button
+					// state never updates). No early-done buffer exists either.
+					logDone.set(logId, { ok: false, count: 0, resolve, reject });
 				})();
 			}),
 
@@ -326,14 +324,11 @@ function createRpcPlatform(): Platform {
 						setUpstream: options.setUpstream,
 					});
 					remoteListeners.set(opId, { onLine: onLine ?? (() => {}) });
-					// A done packet may race the start response — buffered above.
-					const done = remoteDone.get(opId);
-					if (done) {
-						remoteDone.delete(opId);
-						remoteListeners.delete(opId);
-						if (done.ok) resolve({ ok: true, stderr: done.stderr });
-						else reject(new Error(done.stderr || "remote op failed"));
-					}
+					// Register the settler in the map the done handler reads —
+					// without this the packet is dropped and this promise hangs
+					// forever (U7a). No early-done buffer exists on this path,
+					// so there is no early packet to drain here.
+					remoteDone.set(opId, { ok: false, stderr: "", resolve, reject });
 				})();
 			}),
 
