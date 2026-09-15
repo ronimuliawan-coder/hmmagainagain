@@ -17,7 +17,7 @@ import { feedLog, type LogCommit, type LogOptions, log } from "./git/log";
 import { type RemoteOp, type RemoteOptions, remoteOp } from "./git/remote";
 import * as staging from "./git/staging";
 import { type GitStatus, parseStatusV2 } from "./git/status-parser";
-import { spawnGit } from "./git-spawn";
+import { decodeChunks, spawnGit } from "./git-spawn";
 
 export { GitError };
 
@@ -77,7 +77,7 @@ async function status(root: string): Promise<GitStatus> {
 			result.code,
 		);
 	}
-	const raw = chunks.map((c) => new TextDecoder().decode(c)).join("");
+	const raw = decodeChunks(chunks);
 	return parseStatusV2(raw);
 }
 
@@ -95,9 +95,7 @@ async function worktreePaths(root: string): Promise<string[]> {
 			result.code,
 		);
 	}
-	return chunks
-		.map((c) => new TextDecoder().decode(c))
-		.join("")
+	return decodeChunks(chunks)
 		.split("\0")
 		.filter((p) => p.length > 0)
 		.sort();

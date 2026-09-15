@@ -88,6 +88,27 @@ describe("parseStatusV2", () => {
 		]);
 	});
 
+	test("rename orig path that mimics another record type is still consumed", () => {
+		// Porcelain v2 guarantees the orig path right after a rename header —
+		// even when it looks like a `? `/`! `/`1 ` record (CodeRabbit U0–U8).
+		const raw =
+			[
+				"# branch.oid abc0000000000000000000000000000000000004",
+				"# branch.head main",
+				`2 R. N... 100644 100644 100644 3333333 3333333 R100 new.txt${NUL}? notes.txt`,
+			].join(NUL) + NUL;
+		const status = parseStatusV2(raw);
+		expect(status.entries).toEqual([
+			{
+				path: "new.txt",
+				indexStatus: "R",
+				worktreeStatus: ".",
+				renamedFrom: "? notes.txt",
+				origin: "changed",
+			},
+		]);
+	});
+
 	test("unmerged record and upstream ahead/behind", () => {
 		const raw =
 			[
@@ -95,7 +116,7 @@ describe("parseStatusV2", () => {
 				"# branch.head main",
 				"# branch.upstream origin/main",
 				"# branch.ab +3 -7",
-				"u U. N... 000000 000000 000000 1111111 2222222 3333333 conflicted file.txt",
+				"u U. N... 100644 100644 100644 100644 1111111 2222222 3333333 conflicted file.txt",
 			].join(NUL) + NUL;
 		const status = parseStatusV2(raw);
 		expect(status.branch.upstream).toBe("origin/main");

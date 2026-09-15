@@ -125,7 +125,18 @@ let lastSelection: { path: string; start: number; end: number } | null = null;
 function readRecents(): RecentRepos {
 	try {
 		const raw = localStorage.getItem(RECENTS_KEY);
-		if (raw) return JSON.parse(raw) as RecentRepos;
+		if (raw) {
+			const parsed: unknown = JSON.parse(raw);
+			// Shape-guard: a poisoned value must not throw during render
+			// (CodeRabbit U0–U8 review).
+			if (
+				typeof parsed === "object" &&
+				parsed !== null &&
+				Array.isArray((parsed as { recents?: unknown }).recents)
+			) {
+				return parsed as RecentRepos;
+			}
+		}
 	} catch {
 		// corrupted storage — reset to defaults (non-destructive)
 	}
@@ -164,9 +175,12 @@ function renderRepoInfo(info: RepoInfo, status: GitStatus): void {
 		badge = ` · ↓${behind}`;
 	}
 	repoInfo.textContent = `${info.branch} · ${info.head.slice(0, 7)} · ${status.entries.length} change(s)${badge}`;
-	pushBtn.disabled = false;
-	pullBtn.disabled = false;
-	fetchBtn.disabled = false;
+	// Never re-enable mid-operation: watcher-driven renders fire while a
+	// remote op is in flight (CodeRabbit U0–U8 review). Cancel stays on its
+	// own lifecycle in runRemote.
+	pushBtn.disabled = remoteOpRunning;
+	pullBtn.disabled = remoteOpRunning;
+	fetchBtn.disabled = remoteOpRunning;
 }
 
 function renderStatusList(status: GitStatus): void {
@@ -558,9 +572,12 @@ function appendCommitRow(commit: LogCommit): void {
 }
 
 /** Streams the next page of history; append=false restarts the list. */
+let historyLoading = false;
 function refreshHistory(append = false): void {
 	const { root } = store.get();
-	if (!root) return;
+	if (!root || historyLoading) return;
+	historyLoading = true;
+	olderBtn.disabled = true;
 	if (!append) {
 		historyLoaded = 0;
 		historyList.innerHTML = "";
@@ -583,6 +600,12 @@ function refreshHistory(append = false): void {
 			const item = document.createElement("li");
 			item.textContent = `error: ${String(error)}`;
 			historyList.appendChild(item);
+		})
+		.finally(() => {
+			// Serializes Older clicks: no duplicate pages from double-clicks
+			// (CodeRabbit U0–U8 review).
+			historyLoading = false;
+			olderBtn.disabled = false;
 		});
 }
 

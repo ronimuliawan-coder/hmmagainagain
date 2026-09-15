@@ -12,6 +12,9 @@
 #     app running and prints its PID for the ram step; close it when done.
 #   scripts/measure-budgets.sh ram <launcher-pid>
 #     RSS sum (KiB) of a process tree, best-effort via /proc.
+#   scripts/measure-budgets.sh coldstart [runs=10]
+#     exec-to-main-ready + first-frame marker over N launches (needs a
+#     display; each run pops a window for ~2s).
 #
 # Cold start is NOT scripted here — U8b defines an honest proxy first.
 # Every mode prints the machine profile header; numbers without it are
@@ -47,7 +50,7 @@ import { createGitAdapter } from '$REPO/src/bun/git-adapter';
 const t0 = Date.now();
 const r = await createGitAdapter().diff('$dir', {});
 console.log('run=$i bytes=' + r.patch.length + ' files=' + r.files.length + ' ms=' + (Date.now() - t0));
-" | sed "s/run=\$i/run=$i/"
+"
 	done
 	;;
 smoke)
@@ -113,5 +116,5 @@ coldstart)
 	done
 	;;
 *)
-	echo "usage: $0 {size|adapter-fetch|smoke|ram}" >&2; exit 1 ;;
+	echo "usage: $0 {size|adapter-fetch|smoke|ram|coldstart}" >&2; exit 1 ;;
 esac

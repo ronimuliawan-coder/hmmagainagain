@@ -8,8 +8,8 @@
   <body>
     <header id="topbar">
       <strong>hmmagainagain</strong>
-      <input id="repo-path" placeholder="/path/to/repository" list="recents" />
-      <datalist id="recent-list"></datalist>
+        <input id="repo-path" placeholder="/path/to/repository" list="recent-list" aria-label="Repository path" />
+        <datalist id="recent-list"></datalist>
       <button id="open-btn" type="button">Open</button>
       <span id="repo-info">no repository open</span>
     </header>
@@ -62,7 +62,7 @@
         <h2>Branches</h2>
         <select id="branch-select" aria-label="current branch"></select>
         <div id="branch-create-row">
-          <input id="branch-name" placeholder="new-branch-name" />
+          <input id="branch-name" placeholder="new-branch-name" aria-label="New branch name" />
           <button type="button" id="branch-create-btn">Create</button>
         </div>
         <h2>History</h2>

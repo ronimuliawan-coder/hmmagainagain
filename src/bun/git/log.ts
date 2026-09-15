@@ -42,9 +42,12 @@ export function logArgs(options: LogOptions = {}): string[] {
  */
 export class LogRecordParser {
 	private buffer = "";
+	// Persistent streaming decoder: a multi-byte sequence split across pipe
+	// reads must not decode to replacement characters (CodeRabbit U0–U8).
+	private decoder = new TextDecoder();
 
 	feed(chunk: Uint8Array): LogCommit[] {
-		this.buffer += new TextDecoder().decode(chunk);
+		this.buffer += this.decoder.decode(chunk, { stream: true });
 		const commits: LogCommit[] = [];
 		let index = this.buffer.indexOf("\0");
 		while (index !== -1) {
@@ -63,6 +66,8 @@ export class LogRecordParser {
 
 	/** Flush a final (unterminated) record — git closes stdout at exit. */
 	flush(): LogCommit[] {
+		// Drain any bytes the streaming decoder held back, then the buffer.
+		this.buffer += this.decoder.decode();
 		const rest = this.buffer;
 		this.buffer = "";
 		return rest.trim().length > 0 ? [parseCommitRecord(rest)] : [];

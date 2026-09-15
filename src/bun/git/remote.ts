@@ -7,7 +7,7 @@
 // so a diverged state fails with git's verbatim message instead of an
 // implicit merge. No force-push exists anywhere in this module.
 
-import { spawnGit } from "../git-spawn";
+import { assertSafeRef, spawnGit } from "../git-spawn";
 import { GitError } from "./git-error";
 import { enqueueWrite } from "./write-queue";
 
@@ -46,15 +46,30 @@ export async function remoteOp(
 	op: RemoteOp,
 	options: RemoteOptions,
 ): Promise<{ code: number | null }> {
+	// Refuse leading-dash values before argv construction (CWE-88): remote
+	// and branch sit in flag-parsable positions with no `--` separator.
+	assertSafeRef(options.remote, "remote");
+	if (options.branch !== undefined) assertSafeRef(options.branch, "branch");
 	return enqueueWrite(async () => {
-		const stderrChunks: Uint8Array[] = [];
+		// Line-buffer progress: decode streaming (multi-byte sequences may
+		// split across pipe reads) and emit whole lines so consumers never
+		// see half a line or a split character (CodeRabbit U0–U8 review).
+		const lineDecoder = new TextDecoder();
+		let lineRest = "";
+		const emitLines = (text: string): void => {
+			lineRest += text;
+			const parts = lineRest.split("\n");
+			lineRest = parts.pop() ?? "";
+			for (const line of parts) options.onLine?.(`${line}\n`);
+		};
 		const result = await spawnGit(root, argsFor(op, options), {
 			signal: options.signal,
 			onStderr: (c) => {
-				stderrChunks.push(c);
-				options.onLine?.(new TextDecoder().decode(c));
+				emitLines(lineDecoder.decode(c, { stream: true }));
 			},
 		});
+		emitLines(lineDecoder.decode());
+		if (lineRest.length > 0) options.onLine?.(lineRest);
 		if (result.code !== 0) {
 			throw new GitError(`git ${op} failed`, result.stderr, result.code);
 		}

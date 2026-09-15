@@ -22,6 +22,9 @@ const FIXTURE_ENV = {
 	GIT_AUTHOR_EMAIL: "golden@fixture.test",
 	GIT_COMMITTER_NAME: "Golden Fixture",
 	GIT_COMMITTER_EMAIL: "golden@fixture.test",
+	// Hermetic goldens: ignore the machine's global/system git config.
+	GIT_CONFIG_GLOBAL: "/dev/null",
+	GIT_CONFIG_SYSTEM: "/dev/null",
 };
 
 const adapter = createGitAdapter();
@@ -40,6 +43,10 @@ async function remoteHeadOid(): Promise<string> {
 	const result = await spawnGit(originPath, ["rev-parse", "HEAD"], {
 		collectStdout: true,
 	});
+	// Fail loudly: an empty string would silently poison oid comparisons.
+	if (result.code !== 0) {
+		throw new Error(`fixture rev-parse failed: ${result.stderr}`);
+	}
 	return result.stdout?.toString().trim() ?? "";
 }
 
@@ -165,6 +172,18 @@ describe("GitAdapter remote ops (golden)", () => {
 			"refs/heads/feature/tracked",
 		);
 		expect(upstream.trim()).toBe("origin/feature/tracked");
+	});
+
+	test("leading-dash remote/branch are rejected before git runs (CWE-88)", async () => {
+		await expect(
+			adapter.remoteOp(workPath, "push", { remote: "--upload-pack=evil" }),
+		).rejects.toThrow(/must not start with/);
+		await expect(
+			adapter.remoteOp(workPath, "fetch", {
+				remote: "origin",
+				branch: "--help",
+			}),
+		).rejects.toThrow(/must not start with/);
 	});
 
 	test("unknown remote name fails verbatim and moves nothing", async () => {

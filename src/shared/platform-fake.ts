@@ -18,37 +18,6 @@ const TRACKED_FILE = "hello.txt";
 const TRACKED_CONTENT = "hello from the fake fixture\n";
 const LONG_RUN_ARGS = ["log", "--all", "--oneline", "--graph"];
 const LONG_RUN_MARKER = "commit-42-marker";
-let fakeBranch = "main";
-
-// Index simulation for the U5 write paths. hello.txt starts staged (matching
-// the gitDiff fixture); unstaging flips it to a worktree-only modification so
-// the stage action has something to act on — a UI-dev fiction, kept local.
-const staged = new Set<string>([TRACKED_FILE]);
-let commitCount = 0;
-const headOid = () =>
-	`f4k3h34d0000000000000000000000000000000${(1 + commitCount) % 10}`;
-
-const fakeStatusEntries = (): GitStatus["entries"] => [
-	staged.has(TRACKED_FILE)
-		? {
-				path: TRACKED_FILE,
-				indexStatus: "M",
-				worktreeStatus: ".",
-				origin: "changed",
-			}
-		: {
-				path: TRACKED_FILE,
-				indexStatus: ".",
-				worktreeStatus: "M",
-				origin: "changed",
-			},
-	{
-		path: "untracked file.txt",
-		indexStatus: "?",
-		worktreeStatus: "?",
-		origin: "untracked",
-	},
-];
 
 interface FakeCommand {
 	match(args: string[]): boolean;
@@ -63,6 +32,41 @@ interface FakeCommand {
  * The virtual FS map is shared so watch events and command output agree.
  */
 export function buildFakeFixture() {
+	// Per-fixture mutable state (CodeRabbit U0–U8 review): module globals
+	// leaked branch/staged/commit state across fixtures in one process.
+	let fakeBranch = "main";
+
+	// Index simulation for the U5 write paths. hello.txt starts staged
+	// (matching the gitDiff fixture); unstaging flips it to a worktree-only
+	// modification so the stage action has something to act on — a UI-dev
+	// fiction, kept local.
+	const staged = new Set<string>([TRACKED_FILE]);
+	let commitCount = 0;
+	const headOid = () =>
+		`f4k3h34d0000000000000000000000000000000${(1 + commitCount) % 10}`;
+
+	const fakeStatusEntries = (): GitStatus["entries"] => [
+		staged.has(TRACKED_FILE)
+			? {
+					path: TRACKED_FILE,
+					indexStatus: "M",
+					worktreeStatus: ".",
+					origin: "changed",
+				}
+			: {
+					path: TRACKED_FILE,
+					indexStatus: ".",
+					worktreeStatus: "M",
+					origin: "changed",
+				},
+		{
+			path: "untracked file.txt",
+			indexStatus: "?",
+			worktreeStatus: "?",
+			origin: "untracked",
+		},
+	];
+
 	const files = new Map<string, string>([
 		[`${FAKE_REPO}/${TRACKED_FILE}`, TRACKED_CONTENT],
 	]);
@@ -210,8 +214,18 @@ export function buildFakeFixture() {
 				},
 			];
 			let delivered = 0;
+			let seen = 0;
+			const skip = options.skip ?? 0;
+			const limit = options.limit ?? commits.length;
 			for (const commit of commits) {
-				if ((options.skip ?? 0) > delivered) continue;
+				// Count every record toward the skip window, not just
+				// delivered ones, and honor the page size (CodeRabbit U0–U8).
+				if (seen < skip) {
+					seen += 1;
+					continue;
+				}
+				seen += 1;
+				if (delivered >= limit) break;
 				delivered += 1;
 				onCommit(commit);
 			}

@@ -14,6 +14,33 @@ export function assertSafeArgs(args: string[]): void {
 	}
 }
 
+/** Reject leading-dash values before they become git arguments (CWE-88
+ * argument injection: `--upload-pack=` etc. would parse as options, and no
+ * `--` separator exists for refspecs/remotes). Applies to user-influenced
+ * names that flow into argv positions git parses as flags: remotes,
+ * branches, start points. CodeRabbit U0–U8 review. */
+export function assertSafeRef(value: string, what: string): void {
+	if (value.startsWith("-")) {
+		throw new Error(`invalid ${what}: must not start with '-': ${value}`);
+	}
+}
+
+/** Decode collected stdout/stderr chunks: concatenate bytes FIRST, decode
+ * once — per-chunk decoding corrupts multi-byte sequences split across pipe
+ * reads (CodeRabbit U0–U8 review). */
+export function decodeChunks(chunks: Uint8Array[]): string {
+	if (chunks.length === 0) return "";
+	if (chunks.length === 1) return new TextDecoder().decode(chunks[0]);
+	const total = chunks.reduce((n, c) => n + c.length, 0);
+	const joined = new Uint8Array(total);
+	let offset = 0;
+	for (const c of chunks) {
+		joined.set(c, offset);
+		offset += c.length;
+	}
+	return new TextDecoder().decode(joined);
+}
+
 export interface SpawnGitOptions extends GitRunOptions {
 	/** Extra environment for the child (fixtures use it for deterministic
 	 * author/date). Values merge over the inherited process env. */
@@ -78,13 +105,13 @@ export async function spawnGit(
 	// Both pipes are drained concurrently: stdout to the consumer, stderr to a
 	// verbatim buffer. Skipping a drain risks the child blocking on a full pipe.
 	let stderr = "";
-	let stdoutText = "";
+	const stdoutChunks: Uint8Array[] = [];
 	const stderrDecoder = new TextDecoder();
 	const stdoutDone = (async () => {
 		if (!proc.stdout) return;
 		for await (const chunk of proc.stdout) {
 			opts?.onStdout?.(chunk);
-			if (opts?.collectStdout) stdoutText += new TextDecoder().decode(chunk);
+			if (opts?.collectStdout) stdoutChunks.push(chunk);
 		}
 	})().catch(() => {});
 	const stderrDone = (async () => {
@@ -104,6 +131,6 @@ export async function spawnGit(
 		// `aborted` disambiguates a kill we requested from git's own failure exit.
 		signal: proc.signalCode ?? (aborted && exitCode !== 0 ? "SIGTERM" : null),
 		stderr,
-		stdout: opts?.collectStdout ? stdoutText : undefined,
+		stdout: opts?.collectStdout ? decodeChunks(stdoutChunks) : undefined,
 	};
 }
