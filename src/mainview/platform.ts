@@ -373,8 +373,11 @@ function createRpcPlatform(): Platform {
 							pendingRemoteDone.delete(opId);
 							remoteDone.delete(opId);
 							remoteListeners.delete(opId);
+							// The op is finished: return before registering abort
+							// forwarding, or a later abort pings a stale opId.
 							if (earlyDone.ok) resolve({ ok: true, stderr: earlyDone.stderr });
 							else reject(new Error(earlyDone.stderr || "remote op failed"));
+							return;
 						}
 						// Cancellation (U7b): forward the caller's abort to the
 						// server, which kills the child via its own controller.

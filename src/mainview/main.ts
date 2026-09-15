@@ -573,9 +573,16 @@ function appendCommitRow(commit: LogCommit): void {
 
 /** Streams the next page of history; append=false restarts the list. */
 let historyLoading = false;
+// A full refresh requested while a page load is in flight (e.g. from the
+// pull path) is re-run on settle instead of dropped (CodeRabbit follow-up).
+let historyRefreshQueued = false;
 function refreshHistory(append = false): void {
 	const { root } = store.get();
-	if (!root || historyLoading) return;
+	if (!root) return;
+	if (historyLoading) {
+		if (!append) historyRefreshQueued = true;
+		return;
+	}
 	historyLoading = true;
 	olderBtn.disabled = true;
 	if (!append) {
@@ -606,6 +613,10 @@ function refreshHistory(append = false): void {
 			// (CodeRabbit U0–U8 review).
 			historyLoading = false;
 			olderBtn.disabled = false;
+			if (historyRefreshQueued) {
+				historyRefreshQueued = false;
+				refreshHistory();
+			}
 		});
 }
 
