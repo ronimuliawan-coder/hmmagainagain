@@ -14,6 +14,7 @@ import { CatFileSession } from "./git/cat-file";
 import { type DiffOptions, type DiffResult, diff } from "./git/diff";
 import { GitError } from "./git/git-error";
 import { feedLog, type LogCommit, type LogOptions, log } from "./git/log";
+import { type RemoteOp, type RemoteOptions, remoteOp } from "./git/remote";
 import * as staging from "./git/staging";
 import { type GitStatus, parseStatusV2 } from "./git/status-parser";
 import { spawnGit } from "./git-spawn";
@@ -43,6 +44,12 @@ export interface GitAdapter {
 		options?: { switchTo?: boolean; startPoint?: string },
 	): Promise<void>;
 	switchBranch(root: string, name: string): Promise<void>;
+	/** Fetch/push/pull through the serialized write queue (U7). */
+	remoteOp(
+		root: string,
+		op: RemoteOp,
+		options: RemoteOptions,
+	): Promise<{ code: number | null }>;
 	openCatFile(root: string): CatFileSession;
 	/** Index/commit writes (U5). Serialized queue; staging touches only the
 	 * index; commits run hooks and never bypass them. */
@@ -106,6 +113,7 @@ export function createGitAdapter(): GitAdapter {
 		branches: listBranches,
 		createBranch,
 		switchBranch,
+		remoteOp,
 		openCatFile: (root: string) => CatFileSession.start(root),
 		stagePaths: staging.stagePaths,
 		unstagePaths: staging.unstagePaths,

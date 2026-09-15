@@ -21,6 +21,13 @@
       <section id="status-pane">
         <h2>Changed files</h2>
         <ul id="status-list"></ul>
+        <div id="remote-bar">
+          <button type="button" id="fetch-btn" disabled>Fetch</button>
+          <button type="button" id="pull-btn" disabled>Pull</button>
+          <button type="button" id="push-btn" disabled>Push</button>
+          <button type="button" id="cancel-btn" disabled>Cancel</button>
+        </div>
+        <pre id="remote-progress"></pre>
         <div id="commit-box">
           <pre id="write-error"></pre>
           <textarea

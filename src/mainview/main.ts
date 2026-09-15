@@ -72,6 +72,11 @@ const branchSelect = byId<HTMLSelectElement>("branch-select");
 const branchName = byId<HTMLInputElement>("branch-name");
 const branchCreateBtn = byId<HTMLButtonElement>("branch-create-btn");
 const olderBtn = byId<HTMLButtonElement>("older-btn");
+const pushBtn = byId<HTMLButtonElement>("push-btn");
+const pullBtn = byId<HTMLButtonElement>("pull-btn");
+const fetchBtn = byId<HTMLButtonElement>("fetch-btn");
+const cancelBtn = byId<HTMLButtonElement>("cancel-btn");
+const remoteProgress = byId<HTMLPreElement>("remote-progress");
 
 type DiffMode = "worktree" | "staged" | "head" | "range";
 
@@ -141,7 +146,19 @@ function renderRecents(): void {
 }
 
 function renderRepoInfo(info: RepoInfo, status: GitStatus): void {
-	repoInfo.textContent = `${info.branch} · ${info.head.slice(0, 7)} · ${status.entries.length} change(s)`;
+	let badge = "";
+	const { ahead, behind } = status.branch;
+	if (ahead !== undefined && behind !== undefined) {
+		badge = ` · ↑${ahead} ↓${behind}`;
+	} else if (ahead !== undefined) {
+		badge = ` · ↑${ahead}`;
+	} else if (behind !== undefined) {
+		badge = ` · ↓${behind}`;
+	}
+	repoInfo.textContent = `${info.branch} · ${info.head.slice(0, 7)} · ${status.entries.length} change(s)${badge}`;
+	pushBtn.disabled = false;
+	pullBtn.disabled = false;
+	fetchBtn.disabled = false;
 }
 
 function renderStatusList(status: GitStatus): void {
@@ -315,9 +332,15 @@ async function openRepo(root: string): Promise<string> {
 openBtn.addEventListener("click", () => {
 	const root = repoInput.value.trim();
 	if (!root) return;
+	pushBtn.disabled = true;
+	pullBtn.disabled = true;
+	fetchBtn.disabled = true;
 	openRepo(root)
 		.then((summary) => {
 			repoInfo.textContent = summary;
+			pushBtn.disabled = false;
+			pullBtn.disabled = false;
+			fetchBtn.disabled = false;
 		})
 		.catch((error) => {
 			repoInfo.textContent = `error: ${String(error)}`;
@@ -436,10 +459,77 @@ commitBtn.addEventListener("click", () => {
 
 renderRecents();
 
+// ---- U7: push/pull/fetch ----
+let remoteOpRunning = false;
+let remoteController: AbortController | null = null;
+
+async function runRemote(op: "fetch" | "push" | "pull"): Promise<void> {
+	const { root, info } = store.get();
+	if (!root || remoteOpRunning) return;
+	const branch = info?.branch === "(detached)" ? undefined : info?.branch;
+	const controller = new AbortController();
+	remoteController = controller;
+	remoteOpRunning = true;
+	pushBtn.disabled = true;
+	pullBtn.disabled = true;
+	fetchBtn.disabled = true;
+	cancelBtn.disabled = false;
+	remoteProgress.textContent = `${op} …`;
+	try {
+		const result = await getPlatform().gitRemote(
+			root,
+			op,
+			{
+				remote: "origin",
+				branch,
+				setUpstream: op === "push",
+				signal: controller.signal,
+			},
+			(line) => {
+				remoteProgress.textContent = (remoteProgress.textContent + line).slice(
+					-2000,
+				);
+			},
+		);
+		remoteProgress.textContent = `${op} done\n${result.stderr}`;
+		writeError.textContent = "";
+		if (op === "pull") {
+			// A pull moves HEAD and changes the file set, exactly like a
+			// branch switch — refresh tree paths, branches, history and diff,
+			// not just the status list (H2: pull.txt stayed invisible until
+			// the repo was reopened).
+			await afterWorktreeChange();
+		} else {
+			await refreshStatus();
+		}
+	} catch (error) {
+		// Verbatim: auth failures, diverged pull, no upstream, hook output —
+		// or the kill from Cancel, reported as cancelled, not failed.
+		writeError.textContent = String(error);
+		remoteProgress.textContent = controller.signal.aborted
+			? `${op} cancelled`
+			: `${op} failed`;
+		await refreshStatus().catch(() => {});
+	} finally {
+		remoteController = null;
+		remoteOpRunning = false;
+		cancelBtn.disabled = true;
+		if (store.get().root) {
+			pushBtn.disabled = false;
+			pullBtn.disabled = false;
+			fetchBtn.disabled = false;
+		}
+	}
+}
+
+pushBtn.addEventListener("click", () => void runRemote("push"));
+pullBtn.addEventListener("click", () => void runRemote("pull"));
+fetchBtn.addEventListener("click", () => void runRemote("fetch"));
+cancelBtn.addEventListener("click", () => remoteController?.abort());
+
 // ---- U6: history pane + branch operations ----
 const HISTORY_PAGE = 50;
 let historyLoaded = 0;
-let selectedCommitOid: string | null = null;
 
 function appendCommitRow(commit: LogCommit): void {
 	const item = document.createElement("li");
@@ -510,7 +600,6 @@ function refreshBranches(): void {
 
 /** Shows one commit's diff in the diff pane (commit vs its parent). */
 function viewCommit(oid: string): void {
-	selectedCommitOid = oid;
 	store.set({
 		...store.get(),
 		diffMode: "range",
@@ -523,13 +612,12 @@ function viewCommit(oid: string): void {
 	}
 }
 
-/** After a successful branch switch/create-with-switch: the worktree itself
- * changed, so tree paths + status + diff all refresh and the diff view
- * returns to the worktree mode. */
-function afterBranchChange(): Promise<void> {
+/** After the worktree itself changed (branch switch or successful pull):
+ * tree paths + status + diff all refresh and the diff view returns to the
+ * worktree mode. */
+function afterWorktreeChange(): Promise<void> {
 	const { root } = store.get();
 	store.set({ ...store.get(), diffMode: "worktree", diffFrom: "", diffTo: "" });
-	selectedCommitOid = null;
 	return refreshStatus()
 		.then(() => {
 			if (!root) return;
@@ -552,7 +640,7 @@ branchSelect.addEventListener("change", () => {
 	if (!root || !name) return;
 	void getPlatform()
 		.gitSwitchBranch(root, name)
-		.then(() => afterBranchChange())
+		.then(() => afterWorktreeChange())
 		.catch(showWriteError);
 });
 
@@ -568,7 +656,7 @@ branchCreateBtn.addEventListener("click", () => {
 		.then(() => {
 			branchName.value = "";
 			writeError.textContent = "";
-			return afterBranchChange();
+			return afterWorktreeChange();
 		})
 		.catch(showWriteError);
 });

@@ -62,7 +62,7 @@ A target-state document never overrides a still-active production safeguard.
 | U4 | [RON-297](https://linear.app/rons-space/issue/RON-297) | Diff view (CodeView + worker pool) | **Done** (2026-09-03) |
 | U5 | [RON-298](https://linear.app/rons-space/issue/RON-298) | Staging & commit (file + hunk) | **Done** (2026-09-03) |
 | U6 | [RON-299](https://linear.app/rons-space/issue/RON-299) | History & branch operations | **Done** (2026-09-04) |
-| U7 | [RON-300](https://linear.app/rons-space/issue/RON-300) | Push / pull | Pending |
+| U7 | [RON-300](https://linear.app/rons-space/issue/RON-300) | Push / pull | **In Progress** (2026-09-03) |
 | U8 | [RON-301](https://linear.app/rons-space/issue/RON-301) | Budget verification & Linux packaging | Pending |
 
 Only the unit marked `In progress` may be implemented, and only from its approved plan.

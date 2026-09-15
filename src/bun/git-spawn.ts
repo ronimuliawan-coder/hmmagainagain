@@ -22,6 +22,8 @@ export interface SpawnGitOptions extends GitRunOptions {
 	 * Always closed immediately after writing so commands that never read
 	 * stdin see a clean EOF. */
 	stdin?: string;
+	/** Collect stdout chunks into the result (remote ops print to stdout). */
+	collectStdout?: boolean;
 }
 
 export async function spawnGit(
@@ -76,11 +78,13 @@ export async function spawnGit(
 	// Both pipes are drained concurrently: stdout to the consumer, stderr to a
 	// verbatim buffer. Skipping a drain risks the child blocking on a full pipe.
 	let stderr = "";
+	let stdoutText = "";
 	const stderrDecoder = new TextDecoder();
 	const stdoutDone = (async () => {
 		if (!proc.stdout) return;
 		for await (const chunk of proc.stdout) {
 			opts?.onStdout?.(chunk);
+			if (opts?.collectStdout) stdoutText += new TextDecoder().decode(chunk);
 		}
 	})().catch(() => {});
 	const stderrDone = (async () => {
@@ -100,5 +104,6 @@ export async function spawnGit(
 		// `aborted` disambiguates a kill we requested from git's own failure exit.
 		signal: proc.signalCode ?? (aborted && exitCode !== 0 ? "SIGTERM" : null),
 		stderr,
+		stdout: opts?.collectStdout ? stdoutText : undefined,
 	};
 }

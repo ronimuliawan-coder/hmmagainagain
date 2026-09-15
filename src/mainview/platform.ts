@@ -6,7 +6,6 @@
 
 import Electrobun from "electrobun/view";
 import type {
-	BranchInfo,
 	FsEventBatch,
 	GitDiffOptions,
 	GitRunOptions,
@@ -68,6 +67,18 @@ const logDone = new Map<
 		reject: (e: Error) => void;
 	}
 >();
+const remoteListeners = new Map<number, { onLine: (line: string) => void }>();
+const remoteDone = new Map<
+	number,
+	{
+		ok: boolean;
+		stderr: string;
+		resolve: (r: { ok: boolean; stderr: string }) => void;
+		reject: (e: Error) => void;
+	}
+>();
+/** Abort-listener cleanups, keyed by op id (U7b). */
+const remoteAbortCleanups = new Map<number, () => void>();
 
 function deliver(
 	run: RunState,
@@ -169,6 +180,24 @@ function ensureRpc(): RpcInstance {
 						else pending.reject(new Error(msg.error ?? "git log failed"));
 					}
 				},
+				gitRemoteLine: (msg) => {
+					const listener = remoteListeners.get(msg.opId);
+					if (listener) listener.onLine(msg.line);
+				},
+				gitRemoteDone: (msg) => {
+					const pending = remoteDone.get(msg.opId);
+					if (pending) {
+						remoteDone.delete(msg.opId);
+						remoteListeners.delete(msg.opId);
+						remoteAbortCleanups.get(msg.opId)?.();
+						remoteAbortCleanups.delete(msg.opId);
+						if (msg.ok) {
+							pending.resolve({ ok: true, stderr: msg.stderr });
+						} else {
+							pending.reject(new Error(msg.stderr || "remote op failed"));
+						}
+					}
+				},
 				selfTestRun: ({ root, stage, branch }) => {
 					// The self-test itself is DOM-driven and lives in main.ts; the
 					// message bridge hands off via the window event it listens for.
@@ -263,13 +292,11 @@ function createRpcPlatform(): Platform {
 						pendingLogCommits.delete(logId);
 					}
 					logListeners.set(logId, { onCommit, resolve, reject });
-					const done = logDone.get(logId);
-					if (done) {
-						logDone.delete(logId);
-						logListeners.delete(logId);
-						if (done.ok) resolve({ count: done.count });
-						else reject(new Error(done.error ?? "git log failed"));
-					}
+					// Same defect class as U7a: the done handler reads logDone, so
+					// the settler must be registered there — otherwise only rows
+					// stream and the history promise never settles (Older-button
+					// state never updates). No early-done buffer exists either.
+					logDone.set(logId, { ok: false, count: 0, resolve, reject });
 				})();
 			}),
 
@@ -288,6 +315,42 @@ function createRpcPlatform(): Platform {
 		gitSwitchBranch: (root: string, name: string) =>
 			rpc.request.gitSwitchBranch({ root, name }).then((r) => {
 				if (!r.ok) throw new Error(r.error ?? "gitSwitchBranch failed");
+			}),
+
+		gitRemote: (root, op, options, onLine) =>
+			new Promise<{ ok: boolean; stderr: string }>((resolve, reject) => {
+				void (async () => {
+					const { opId } = await rpc.request.gitRemoteStart({
+						root,
+						op,
+						remote: options.remote,
+						branch: options.branch,
+						setUpstream: options.setUpstream,
+					});
+					remoteListeners.set(opId, { onLine: onLine ?? (() => {}) });
+					// Register the settler in the map the done handler reads —
+					// without this the packet is dropped and this promise hangs
+					// forever (U7a). No early-done buffer exists on this path,
+					// so there is no early packet to drain here.
+					remoteDone.set(opId, { ok: false, stderr: "", resolve, reject });
+					// Cancellation (U7b): forward the caller's abort to the
+					// server, which kills the child via its own controller.
+					if (options.signal) {
+						const signal = options.signal;
+						const onAbort = () => {
+							remoteAbortCleanups.delete(opId);
+							void rpc.request.gitRemoteAbort({ opId });
+						};
+						if (signal.aborted) {
+							onAbort();
+						} else {
+							remoteAbortCleanups.set(opId, () =>
+								signal.removeEventListener("abort", onAbort),
+							);
+							signal.addEventListener("abort", onAbort, { once: true });
+						}
+					}
+				})();
 			}),
 
 		stagePaths: (root: string, paths: string[]) =>
