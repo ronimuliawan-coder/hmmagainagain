@@ -25,11 +25,13 @@ git state, verify toolchain, verify gate, then compare against the Linear ledger
 2. `gh pr list` — open PRs are the truth for in-flight units.
 3. Compare the last merged unit against the GOVERNANCE unit table; the next unit starts
    only with owner confirmation.
-4. Toolchain check: `bun --version` (1.4.0), `hutch --version` (0.24.3 via
-   `~/.hutch/bin` — wired by a PATH line in `~/.bashrc`), Electrobun pinned **2.0.1** in
-   `hutch.config.ts`. If `hutch` is missing, re-create `~/.hutch/bin` symlinks to
-   `~/.hutch/npm/electrobun/2.0.1/linux-x64/bin/` — do not rerun the installer (it refuses
-   a pre-existing `~/.hutch`; this is recorded, not a failure to fix).
+4. Toolchain check: `bun --version` (1.4.0), `hutch --version` (0.26.0 via
+   `~/.hutch/bin` — wired by a PATH line in `~/.bashrc`; installer:
+   `curl -fsSL https://hutch.blackboard.sh/hutch/install.sh | sh`), Electrobun pinned **2.0.1** in
+   `hutch.config.ts`, provisioned by `hutch electrobun prepare` into `./.hutch/devkit`
+   (gitignored). If only `~/.hutch/bin` is missing but `~/.hutch` still exists, do not
+   rerun the installer (it refuses a pre-existing `~/.hutch`); if `~/.hutch` is entirely
+   absent, a fresh install is safe and required (done 2026-09-15).
 5. `bun run install:deps` if `node_modules` is missing, then `bun run check` — must be
    green before any change.
 6. Reference clone `/home/ron/Projects/pierre` is read-only; if missing, it is optional —

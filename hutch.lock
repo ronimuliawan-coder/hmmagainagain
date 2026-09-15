@@ -13,6 +13,7 @@
         "@types/bun": "latest",
         "@types/jsdom": "^30.0.0",
         "concurrently": "^9.1.0",
+        "electrobun": "2.0.1",
         "jsdom": "^30.0.1",
         "typescript": "^5.7.2",
         "vite": "^6.0.3",
@@ -30,9 +31,9 @@
 
     "@biomejs/cli-darwin-x64": ["@biomejs/cli-darwin-x64@2.5.12", "https://registry.npmjs.org/@biomejs/cli-darwin-x64/-/cli-darwin-x64-2.5.12.tgz", {"os": ["darwin"], "cpu": ["x64"]}, "sha512-vhPgwnh+6tN3ArdAXuET99xaNbFt7CG82Bqn+omHVLC5xdVx45JsYjGPmUIGNzjDek5XdNCP1HKksK7fn8+3bQ=="],
 
-    "@biomejs/cli-linux-arm64": ["@biomejs/cli-linux-arm64@2.5.12", "https://registry.npmjs.org/@biomejs/cli-linux-arm64/-/cli-linux-arm64-2.5.12.tgz", {"os": ["linux"], "cpu": ["arm64"]}, "sha512-2gp8aVwXYKdAtmBfRFCUuyDMcfN1ahHqUkGfLYrZlNRFmryMATLVvJgWKvyA8wu4Rwn5OSxM1UcUmOuOFNGeBQ=="],
+    "@biomejs/cli-linux-arm64": ["@biomejs/cli-linux-arm64@2.5.12", "https://registry.npmjs.org/@biomejs/cli-linux-arm64/-/cli-linux-arm64-2.5.12.tgz", {"os": ["linux"], "cpu": ["arm64"], "libc": ["glibc"]}, "sha512-2gp8aVwXYKdAtmBfRFCUuyDMcfN1ahHqUkGfLYrZlNRFmryMATLVvJgWKvyA8wu4Rwn5OSxM1UcUmOuOFNGeBQ=="],
 
-    "@biomejs/cli-linux-arm64-musl": ["@biomejs/cli-linux-arm64-musl@2.5.12", "https://registry.npmjs.org/@biomejs/cli-linux-arm64-musl/-/cli-linux-arm64-musl-2.5.12.tgz", {"os": ["linux"], "cpu": ["arm64"]}, "sha512-couHYjFLL5uuI8ne6zhT7KwEsXo5YP7ry/2xmEqah7qanu0YmfDi3mwJg47YXSuv/NpZj22CZzcRH/5c4gjPSQ=="],
+    "@biomejs/cli-linux-arm64-musl": ["@biomejs/cli-linux-arm64-musl@2.5.12", "https://registry.npmjs.org/@biomejs/cli-linux-arm64-musl/-/cli-linux-arm64-musl-2.5.12.tgz", {"os": ["linux"], "cpu": ["arm64"], "libc": ["musl"]}, "sha512-couHYjFLL5uuI8ne6zhT7KwEsXo5YP7ry/2xmEqah7qanu0YmfDi3mwJg47YXSuv/NpZj22CZzcRH/5c4gjPSQ=="],
 
     "@biomejs/cli-linux-x64": ["@biomejs/cli-linux-x64@2.5.12", "", {"os": ["linux"], "cpu": ["x64"], "libc": ["glibc"]}, ""],
 
@@ -247,6 +248,8 @@
     "devlop": ["devlop@1.1.0", "", {"dependencies": {"dequal": "^2.0.0"}}, ""],
 
     "diff": ["diff@9.0.0", "", {}, ""],
+
+    "electrobun": ["electrobun@2.0.1", "", {"bin": {"electrobun": "bin/electrobun.cjs"}}, ""],
 
     "emoji-regex": ["emoji-regex@8.0.0", "https://registry.npmjs.org/emoji-regex/-/emoji-regex-8.0.0.tgz", {}, "sha512-MSjYzcWNOA0ewAHpz0MxpYFvwg6yjy1NG3xteoqz644VCo/RPgnr1/GGt+ic3iJTzQ8Eu3TdM14SawnVUmGE6A=="],
 
