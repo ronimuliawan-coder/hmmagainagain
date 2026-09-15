@@ -493,7 +493,15 @@ async function runRemote(op: "fetch" | "push" | "pull"): Promise<void> {
 		);
 		remoteProgress.textContent = `${op} done\n${result.stderr}`;
 		writeError.textContent = "";
-		await refreshStatus();
+		if (op === "pull") {
+			// A pull moves HEAD and changes the file set, exactly like a
+			// branch switch — refresh tree paths, branches, history and diff,
+			// not just the status list (H2: pull.txt stayed invisible until
+			// the repo was reopened).
+			await afterWorktreeChange();
+		} else {
+			await refreshStatus();
+		}
 	} catch (error) {
 		// Verbatim: auth failures, diverged pull, no upstream, hook output —
 		// or the kill from Cancel, reported as cancelled, not failed.
@@ -604,10 +612,10 @@ function viewCommit(oid: string): void {
 	}
 }
 
-/** After a successful branch switch/create-with-switch: the worktree itself
- * changed, so tree paths + status + diff all refresh and the diff view
- * returns to the worktree mode. */
-function afterBranchChange(): Promise<void> {
+/** After the worktree itself changed (branch switch or successful pull):
+ * tree paths + status + diff all refresh and the diff view returns to the
+ * worktree mode. */
+function afterWorktreeChange(): Promise<void> {
 	const { root } = store.get();
 	store.set({ ...store.get(), diffMode: "worktree", diffFrom: "", diffTo: "" });
 	return refreshStatus()
@@ -632,7 +640,7 @@ branchSelect.addEventListener("change", () => {
 	if (!root || !name) return;
 	void getPlatform()
 		.gitSwitchBranch(root, name)
-		.then(() => afterBranchChange())
+		.then(() => afterWorktreeChange())
 		.catch(showWriteError);
 });
 
@@ -648,7 +656,7 @@ branchCreateBtn.addEventListener("click", () => {
 		.then(() => {
 			branchName.value = "";
 			writeError.textContent = "";
-			return afterBranchChange();
+			return afterWorktreeChange();
 		})
 		.catch(showWriteError);
 });
