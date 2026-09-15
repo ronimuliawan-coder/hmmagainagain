@@ -30,8 +30,11 @@ A target-state document never overrides a still-active production safeguard.
    transport; no credential storage — system git credential helpers / SSH agent only.
 3. **No shell interpolation:** git via argument arrays only, cwd pinned to the opened
    repository, `--` separators before user-supplied paths, all through the GitAdapter.
-4. **Measured budgets:** installer ≤ 20 MB (Linux) · cold start ≤ 300 ms · idle RAM
+4. **Measured budgets:** installer ≤ 40 MB (Linux) · cold start ≤ 300 ms · idle RAM
    ≤ 150 MB · smooth scrolling on a 1M-line diff. Measured evidence beats aspiration.
+   (Installer was ≤ 20 MB until 2026-09-15: RON-301 measured the bun runtime at 97%
+   of the 35 MB payload — arithmetically unreachable without a runtime swap.
+   Owner-approved exception; Cottontail migration trigger-armed.)
 
 ## Ownership map (one owner per responsibility)
 
