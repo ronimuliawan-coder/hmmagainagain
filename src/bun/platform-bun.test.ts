@@ -42,12 +42,28 @@ async function buildFixture(): Promise<ConformanceFixture> {
 			throw new Error(`fixture git ${args[0]} failed: ${result.stderr}`);
 		}
 	}
+	// Second commit (conformance paging needs two) + a local bare origin
+	// (conformance fetch must resolve without network). Additive only:
+	// no existing assertion reads refs beyond HEAD:trackedFile.
+	writeFileSync(join(repoRoot, "second.txt"), "second\n");
+	for (const args of [
+		["add", "."],
+		["commit", "-q", "-m", "second"],
+		["init", "-q", "--bare", join(base, "origin.git")],
+		["remote", "add", "origin", join(base, "origin.git")],
+	]) {
+		const result = await spawnGit(repoRoot, args);
+		if (result.code !== 0) {
+			throw new Error(`fixture git ${args[0]} failed: ${result.stderr}`);
+		}
+	}
 
 	return {
 		repoRoot,
 		nonRepoRoot,
 		trackedFile: "hello.txt",
 		trackedContent: TRACKED_CONTENT,
+		remoteName: "origin",
 		longRunArgs: ["show", "HEAD:big.txt"],
 		longRunMarker: MARKER,
 		makeNestedChange: () => {
