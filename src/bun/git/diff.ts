@@ -1,5 +1,6 @@
-// Diff read path: per-file numstat (with binary detection) plus the full
-// colorless patch text the diff view (U4, @pierre/diffs) renders.
+// Diff read path: a SINGLE git traversal per request (post-v1 Unit A).
+// File statistics derive from the patch text itself; the old --numstat
+// second traversal was removed after differential proof (see diff.test.ts).
 //
 // Range semantics:
 //   { staged: true }                 → git diff --cached          (index vs HEAD)
@@ -27,6 +28,8 @@ export interface DiffOptions {
 	from?: string;
 	to?: string;
 	pathspecs?: string[];
+	/** Aborts the in-flight diff; never serialized anywhere. */
+	signal?: AbortSignal;
 }
 
 function rangeArgs(options: DiffOptions): string[] {
@@ -40,10 +43,15 @@ function pathArgs(options: DiffOptions): string[] {
 	return options.pathspecs?.length ? ["--", ...options.pathspecs] : [];
 }
 
-async function collectText(root: string, args: string[]): Promise<string> {
+async function collectText(
+	root: string,
+	args: string[],
+	signal?: AbortSignal,
+): Promise<string> {
 	const chunks: Uint8Array[] = [];
 	const result = await spawnGit(root, args, {
 		onStdout: (c) => chunks.push(c),
+		signal,
 	});
 	if (result.code !== 0) {
 		throw new Error(`git ${args[0]} failed: ${result.stderr}`);
@@ -51,43 +59,147 @@ async function collectText(root: string, args: string[]): Promise<string> {
 	return decodeChunks(chunks);
 }
 
-function parseNumstat(raw: string): DiffFile[] {
-	const files: DiffFile[] = [];
-	// -z: each record NUL-terminated; rename records carry the orig path as a
-	// second NUL-separated field. Tab-separated columns inside the record.
-	// Verified empirically (git 2.55): a rename/copy record is
-	//   "add\tdel\t" NUL  origPath NUL  newPath NUL
-	// — the destination path comes LAST. Regular records are
-	//   "add\tdel\tpath" NUL with the path non-empty.
-	const records = raw.split("\0");
-	let i = 0;
-	while (i < records.length) {
-		const record = records[i];
-		i += 1;
-		if (record.length === 0) continue;
-		const tabs = record.split("\t");
-		if (tabs.length >= 3 && tabs[2] === "") {
-			const orig = records[i];
-			const newPath = records[i + 1];
-			i += 2;
-			if (orig === undefined || newPath === undefined) continue;
-			files.push({
-				path: newPath,
-				renamedFrom: orig,
-				additions: tabs[0] === "-" ? -1 : Number(tabs[0]),
-				deletions: tabs[1] === "-" ? -1 : Number(tabs[1]),
-				binary: tabs[0] === "-",
-			});
+/** Undo git's C-style path quoting (core.quotePath): `"a/\303\251x"`
+ * back to raw UTF-8. Unquoted paths pass through untouched. */
+export function unquotePath(path: string): string {
+	if (path.length < 2 || !path.startsWith('"') || !path.endsWith('"')) {
+		return path;
+	}
+	const inner = path.slice(1, -1);
+	const bytes: number[] = [];
+	let out = "";
+	const flush = (): void => {
+		if (bytes.length > 0) {
+			out += new TextDecoder().decode(new Uint8Array(bytes));
+			bytes.length = 0;
+		}
+	};
+	for (let i = 0; i < inner.length; i++) {
+		const c = inner[i];
+		if (c !== "\\" || i + 1 >= inner.length) {
+			for (const b of new TextEncoder().encode(c)) bytes.push(b);
 			continue;
 		}
-		if (tabs.length < 3 || tabs[2].length === 0) continue;
-		files.push({
-			path: tabs[2],
-			additions: tabs[0] === "-" ? -1 : Number(tabs[0]),
-			deletions: tabs[1] === "-" ? -1 : Number(tabs[1]),
-			binary: tabs[0] === "-",
-		});
+		const next = inner[i + 1];
+		if (next === "n") {
+			flush();
+			out += "\n";
+			i += 1;
+		} else if (next === "t") {
+			flush();
+			out += "\t";
+			i += 1;
+		} else if (next === "\\" || next === '"') {
+			for (const b of new TextEncoder().encode(next)) bytes.push(b);
+			i += 1;
+		} else if (/[0-7]/.test(next)) {
+			const octal = inner.slice(i + 1, i + 4);
+			if (/^[0-7]{3}$/.test(octal)) {
+				bytes.push(parseInt(octal, 8));
+				i += 3;
+			} else {
+				for (const b of new TextEncoder().encode(c)) bytes.push(b);
+			}
+		} else {
+			for (const b of new TextEncoder().encode(c)) bytes.push(b);
+		}
 	}
+	flush();
+	return out;
+}
+
+interface PatchFile extends DiffFile {
+	inHunk: boolean;
+	/** Candidate paths from ---/+++ lines (space-safe; see below). */
+	minusPath?: string;
+	plusPath?: string;
+}
+
+/** Derive per-file statistics from unified patch text (single traversal).
+ * Covers renames, binary, mode-only, new/deleted files, and quoted paths;
+ * differential-proof against `git diff --numstat` lives in diff.test.ts. */
+export function parsePatchStats(patch: string): DiffFile[] {
+	const files: DiffFile[] = [];
+	let current: PatchFile | null = null;
+	const flush = (): void => {
+		if (current) {
+			// Prefer ---/+++ paths: b-side tokenizing of `diff --git` breaks
+			// on spaces, while these lines carry one path each. Deleted files
+			// have no +++ side (use ---); rename target still wins below.
+			if (current.plusPath !== undefined) current.path = current.plusPath;
+			else if (current.minusPath !== undefined)
+				current.path = current.minusPath;
+			const {
+				inHunk: _dropped,
+				minusPath: _m,
+				plusPath: _p,
+				...file
+			} = current;
+			files.push(file);
+			current = null;
+		}
+	};
+	// One token per side: `"quoted path"` or a bare non-space run. Bare
+	// paths WITH spaces defeat this split — the ---/+++ lines repair them.
+	const tokenize = (rest: string): string[] =>
+		rest.match(/"(?:[^"\\]|\\.)*"|\S+/g) ?? [];
+	for (const rawLine of patch.split("\n")) {
+		if (rawLine.startsWith("diff --git ")) {
+			flush();
+			const tokens = tokenize(rawLine.slice("diff --git ".length));
+			const bRaw = tokens[1] ?? tokens[0] ?? "";
+			const bPath = unquotePath(bRaw).replace(/^[ab]\//, "");
+			current = {
+				path: bPath,
+				additions: 0,
+				deletions: 0,
+				binary: false,
+				inHunk: false,
+			};
+			continue;
+		}
+		if (!current) continue;
+		if (rawLine.startsWith("rename from ")) {
+			current.renamedFrom = unquotePath(
+				rawLine.slice("rename from ".length).trim(),
+			);
+			continue;
+		}
+		if (rawLine.startsWith("rename to ")) {
+			const toPath = unquotePath(rawLine.slice("rename to ".length).trim());
+			if (toPath.length > 0) current.path = toPath;
+			continue;
+		}
+		if (rawLine.startsWith("Binary files ")) {
+			current.binary = true;
+			current.additions = -1;
+			current.deletions = -1;
+			continue;
+		}
+		if (rawLine.startsWith("@@ ")) {
+			current.inHunk = true;
+			continue;
+		}
+		if (rawLine.startsWith("--- ") && !rawLine.startsWith("--- /dev/null")) {
+			current.minusPath = unquotePath(
+				rawLine.slice("--- ".length).trim(),
+			).replace(/^[ab]\//, "");
+			continue;
+		}
+		if (rawLine.startsWith("+++ ") && !rawLine.startsWith("+++ /dev/null")) {
+			current.plusPath = unquotePath(
+				rawLine.slice("+++ ".length).trim(),
+			).replace(/^[ab]\//, "");
+			continue;
+		}
+		if (!current.inHunk) continue;
+		if (rawLine.startsWith("+") && !rawLine.startsWith("+++")) {
+			current.additions += 1;
+		} else if (rawLine.startsWith("-") && !rawLine.startsWith("---")) {
+			current.deletions += 1;
+		}
+	}
+	flush();
 	return files;
 }
 
@@ -95,19 +207,10 @@ export async function diff(
 	root: string,
 	options: DiffOptions = {},
 ): Promise<DiffResult> {
-	const numstatRaw = await collectText(root, [
-		"diff",
-		"--numstat",
-		"-z",
-		"--no-color",
-		...rangeArgs(options),
-		...pathArgs(options),
-	]);
-	const patch = await collectText(root, [
-		"diff",
-		"--no-color",
-		...rangeArgs(options),
-		...pathArgs(options),
-	]);
-	return { files: parseNumstat(numstatRaw), patch };
+	const patch = await collectText(
+		root,
+		["diff", "--no-color", ...rangeArgs(options), ...pathArgs(options)],
+		options.signal,
+	);
+	return { files: parsePatchStats(patch), patch };
 }

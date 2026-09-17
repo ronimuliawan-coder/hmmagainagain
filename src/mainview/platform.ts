@@ -6,6 +6,7 @@
 
 import Electrobun from "electrobun/view";
 import type {
+	DiffResult,
 	FsEventBatch,
 	GitDiffOptions,
 	GitRunOptions,
@@ -85,8 +86,22 @@ const pendingLogDone = new Map<
 	{ ok: boolean; count: number; error?: string }
 >();
 const pendingRemoteDone = new Map<number, { ok: boolean; stderr: string }>();
+/** Diff settlers + early packets (A2: start/done split like gitRemote). */
+const diffDone = new Map<
+	number,
+	{
+		resolve: (r: DiffResult) => void;
+		reject: (e: Error) => void;
+	}
+>();
+const pendingDiffDone = new Map<
+	number,
+	{ ok: boolean; result?: DiffResult; stderr: string }
+>();
 /** Abort-listener cleanups, keyed by op id (U7b). */
 const remoteAbortCleanups = new Map<number, () => void>();
+/** Abort-listener cleanups, keyed by diff id (A2). */
+const diffAbortCleanups = new Map<number, () => void>();
 
 function deliver(
 	run: RunState,
@@ -210,6 +225,21 @@ function ensureRpc(): RpcInstance {
 						pending.reject(new Error(msg.stderr || "remote op failed"));
 					}
 				},
+				gitDiffDone: (msg) => {
+					const pending = diffDone.get(msg.diffId);
+					if (!pending) {
+						pendingDiffDone.set(msg.diffId, msg);
+						return;
+					}
+					diffDone.delete(msg.diffId);
+					diffAbortCleanups.get(msg.diffId)?.();
+					diffAbortCleanups.delete(msg.diffId);
+					if (msg.ok && msg.result) {
+						pending.resolve(msg.result);
+					} else {
+						pending.reject(new Error(msg.stderr || "git diff failed"));
+					}
+				},
 				selfTestRun: ({ root, stage, branch }) => {
 					// The self-test itself is DOM-driven and lives in main.ts; the
 					// message bridge hands off via the window event it listens for.
@@ -283,9 +313,42 @@ function createRpcPlatform(): Platform {
 			}),
 
 		gitDiff: (root: string, options?: GitDiffOptions) =>
-			rpc.request.gitDiff({ root, ...options }).then((r) => {
-				if (!r.ok || !r.result) throw new Error(r.error ?? "gitDiff failed");
-				return r.result;
+			new Promise<DiffResult>((resolve, reject) => {
+				void (async () => {
+					try {
+						// Strip the abort signal: transport-local, never RPC data.
+						const { signal, ...params } = options ?? {};
+						const { diffId } = await rpc.request.gitDiffStart({
+							root,
+							...params,
+						});
+						diffDone.set(diffId, { resolve, reject });
+						const earlyDone = pendingDiffDone.get(diffId);
+						if (earlyDone) {
+							pendingDiffDone.delete(diffId);
+							diffDone.delete(diffId);
+							if (earlyDone.ok && earlyDone.result) resolve(earlyDone.result);
+							else reject(new Error(earlyDone.stderr || "git diff failed"));
+							return;
+						}
+						if (signal) {
+							const onAbort = () => {
+								diffAbortCleanups.delete(diffId);
+								void rpc.request.gitDiffAbort({ diffId });
+							};
+							if (signal.aborted) {
+								onAbort();
+							} else {
+								diffAbortCleanups.set(diffId, () =>
+									signal.removeEventListener("abort", onAbort),
+								);
+								signal.addEventListener("abort", onAbort, { once: true });
+							}
+						}
+					} catch (error) {
+						reject(error instanceof Error ? error : new Error(String(error)));
+					}
+				})();
 			}),
 
 		gitWorktreePaths: (root: string) =>
