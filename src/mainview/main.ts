@@ -115,6 +115,7 @@ let watcher: { stop: () => Promise<void> } | null = null;
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 // Guards against applying a stale diff response after a rapid range switch.
 let diffSeq = 0;
+let diffController: AbortController | null = null;
 // Stage timings of the last diff load — read by the SMOKE self-test.
 const diffTimings = { fetchMs: 0, parseMs: 0, files: 0 };
 // The patch behind the current diff view + the user's line selection in it —
@@ -285,12 +286,18 @@ async function refreshDiff(): Promise<void> {
 	if (!state.root) return;
 	if (!diffView) diffView = mountDiffView(diffContainer, handleDiffSelection);
 	const seq = ++diffSeq;
+	// A2: superseded diffs die instead of racing. The previous request is
+	// aborted before the new one starts; the seq guard below stays as the
+	// final stale-result backstop.
+	diffController?.abort();
+	const controller = new AbortController();
+	diffController = controller;
 	try {
 		const t0 = performance.now();
-		const result = await getPlatform().gitDiff(
-			state.root,
-			diffOptionsFor(state),
-		);
+		const result = await getPlatform().gitDiff(state.root, {
+			...diffOptionsFor(state),
+			signal: controller.signal,
+		});
 		const fetchMs = performance.now() - t0;
 		if (seq !== diffSeq) return; // a newer request superseded this one
 		const t1 = performance.now();
@@ -304,6 +311,8 @@ async function refreshDiff(): Promise<void> {
 		diffTimings.files = result.files.length;
 		diffInfo.textContent = `${result.files.length} file(s)`;
 	} catch (error) {
+		// A superseded request's abort is silence, not an error to display.
+		if (controller.signal.aborted) return;
 		// Surface bad ranges (e.g. unknown ref) in the pane, not as a rejection.
 		if (seq === diffSeq) {
 			diffTimings.files = 0;

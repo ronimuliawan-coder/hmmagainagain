@@ -172,4 +172,13 @@ describe("parsePatchStats", () => {
 	test("empty patch yields no files", () => {
 		expect(parsePatchStats("")).toEqual([]);
 	});
+
+	test("aborted signal rejects instead of running git", async () => {
+		const dir = initRepo("abort");
+		writeFileSync(join(dir, "a.txt"), "x\n");
+		commitAll(dir, "base");
+		const controller = new AbortController();
+		controller.abort();
+		await expect(diff(dir, { signal: controller.signal })).rejects.toThrow();
+	});
 });

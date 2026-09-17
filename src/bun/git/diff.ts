@@ -28,6 +28,8 @@ export interface DiffOptions {
 	from?: string;
 	to?: string;
 	pathspecs?: string[];
+	/** Aborts the in-flight diff; never serialized anywhere. */
+	signal?: AbortSignal;
 }
 
 function rangeArgs(options: DiffOptions): string[] {
@@ -41,10 +43,15 @@ function pathArgs(options: DiffOptions): string[] {
 	return options.pathspecs?.length ? ["--", ...options.pathspecs] : [];
 }
 
-async function collectText(root: string, args: string[]): Promise<string> {
+async function collectText(
+	root: string,
+	args: string[],
+	signal?: AbortSignal,
+): Promise<string> {
 	const chunks: Uint8Array[] = [];
 	const result = await spawnGit(root, args, {
 		onStdout: (c) => chunks.push(c),
+		signal,
 	});
 	if (result.code !== 0) {
 		throw new Error(`git ${args[0]} failed: ${result.stderr}`);
@@ -200,11 +207,10 @@ export async function diff(
 	root: string,
 	options: DiffOptions = {},
 ): Promise<DiffResult> {
-	const patch = await collectText(root, [
-		"diff",
-		"--no-color",
-		...rangeArgs(options),
-		...pathArgs(options),
-	]);
+	const patch = await collectText(
+		root,
+		["diff", "--no-color", ...rangeArgs(options), ...pathArgs(options)],
+		options.signal,
+	);
 	return { files: parsePatchStats(patch), patch };
 }

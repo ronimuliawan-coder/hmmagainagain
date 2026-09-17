@@ -14,7 +14,9 @@ const harness = {
 	messages: {} as Record<string, MsgHandler>,
 	nextOpId: 0,
 	nextLogId: 0,
+	nextDiffId: 0,
 	abortCalls: [] as number[],
+	diffAbortCalls: [] as number[],
 	/** When set, start requests wait for this gate (early-packet tests). */
 	startGate: null as Promise<void> | null,
 	/** When true, the next start request rejects (start-failure tests). */
@@ -44,6 +46,11 @@ const FakeElectroview = Object.assign(
 						return { ok: true };
 					},
 					gitLogStart: async () => ({ logId: ++harness.nextLogId }),
+					gitDiffStart: async () => ({ diffId: ++harness.nextDiffId }),
+					gitDiffAbort: async (params: { diffId: number }) => {
+						harness.diffAbortCalls.push(params.diffId);
+						return { ok: true };
+					},
 				},
 				send: {},
 			};
@@ -238,5 +245,29 @@ describe("rpc platform gitRemote settling (U7a)", () => {
 		} finally {
 			harness.startGate = null;
 		}
+	});
+
+	test("aborting a diff request sends gitDiffAbort (A2)", async () => {
+		const platform = getPlatform();
+		const controller = new AbortController();
+		const pending = platform.gitDiff("root", { signal: controller.signal });
+		void pending.catch(() => {});
+		await flush();
+		const diffId = harness.nextDiffId;
+		expect(diffId).toBeGreaterThan(0);
+		controller.abort();
+		await flush();
+		expect(harness.diffAbortCalls).toContain(diffId);
+		harness.messages.gitDiffDone({
+			diffId,
+			ok: true,
+			result: { files: [], patch: "" },
+			stderr: "",
+		});
+		await expect(withHangGuard(pending, "gitDiff")).resolves.toEqual({
+			files: [],
+			patch: "",
+		});
+		await flush();
 	});
 });

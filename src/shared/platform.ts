@@ -43,6 +43,10 @@ export interface GitDiffOptions {
 	staged?: boolean;
 	from?: string;
 	to?: string;
+	/** Aborts the in-flight diff (A2); implementations without cancel
+	 * support (fake) ignore it. Never sent over RPC — stripped by the
+	 * client before the request. */
+	signal?: AbortSignal;
 }
 
 /**
@@ -147,10 +151,13 @@ export type PlatformRPCSchema = {
 				params: { root: string };
 				response: { ok: boolean; status?: GitStatus; error?: string };
 			};
-			gitDiff: {
+			// Diff runs start/abort separately (A2) so superseded diffs die
+			// instead of racing; completion arrives as gitDiffDone.
+			gitDiffStart: {
 				params: { root: string; from?: string; to?: string; staged?: boolean };
-				response: { ok: boolean; result?: DiffResult; error?: string };
+				response: { diffId: number };
 			};
+			gitDiffAbort: { params: { diffId: number }; response: { ok: boolean } };
 			gitLogStart: {
 				params: { root: string; limit?: number; skip?: number; range?: string };
 				response: { logId: number };
@@ -224,6 +231,12 @@ export type PlatformRPCSchema = {
 			selfTestRun: { root: string; stage?: boolean; branch?: boolean };
 			gitLogCommit: { logId: number; commit: LogCommit };
 			gitLogDone: { logId: number; ok: boolean; count: number; error?: string };
+			gitDiffDone: {
+				diffId: number;
+				ok: boolean;
+				result?: DiffResult;
+				stderr: string;
+			};
 			gitRemoteLine: { opId: number; line: string };
 			gitRemoteDone: { opId: number; ok: boolean; stderr: string };
 		};
