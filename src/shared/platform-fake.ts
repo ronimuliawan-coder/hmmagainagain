@@ -312,6 +312,7 @@ export function buildFakeFixture() {
 		nonRepoRoot: FAKE_NON_REPO,
 		trackedFile: TRACKED_FILE,
 		trackedContent: TRACKED_CONTENT,
+		remoteName: "origin",
 		longRunArgs: LONG_RUN_ARGS,
 		longRunMarker: LONG_RUN_MARKER,
 		makeNestedChange: () => {

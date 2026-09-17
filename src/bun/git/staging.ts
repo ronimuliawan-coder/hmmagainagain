@@ -39,7 +39,7 @@ async function runWrite(
 
 export async function stagePaths(root: string, paths: string[]): Promise<void> {
 	if (paths.length === 0) return;
-	await enqueueWrite(() => runWrite(root, ["add", "-A", "--", ...paths]));
+	await enqueueWrite(root, () => runWrite(root, ["add", "-A", "--", ...paths]));
 }
 
 export async function unstagePaths(
@@ -47,7 +47,7 @@ export async function unstagePaths(
 	paths: string[],
 ): Promise<void> {
 	if (paths.length === 0) return;
-	await enqueueWrite(() =>
+	await enqueueWrite(root, () =>
 		runWrite(root, ["restore", "--staged", "--", ...paths]),
 	);
 }
@@ -57,7 +57,7 @@ export async function applyIndexPatch(
 	patch: string,
 ): Promise<void> {
 	if (patch.trim().length === 0) return;
-	await enqueueWrite(() =>
+	await enqueueWrite(root, () =>
 		// The patch goes in via stdin; `-` reads it. A patch whose context no
 		// longer matches the index fails here with git's own message.
 		runWrite(root, ["apply", "--cached", "--whitespace=nowarn", "-"], patch),
@@ -65,5 +65,5 @@ export async function applyIndexPatch(
 }
 
 export async function commit(root: string, message: string): Promise<void> {
-	await enqueueWrite(() => runWrite(root, ["commit", "-m", message]));
+	await enqueueWrite(root, () => runWrite(root, ["commit", "-m", message]));
 }

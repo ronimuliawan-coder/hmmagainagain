@@ -50,7 +50,7 @@ export async function remoteOp(
 	// and branch sit in flag-parsable positions with no `--` separator.
 	assertSafeRef(options.remote, "remote");
 	if (options.branch !== undefined) assertSafeRef(options.branch, "branch");
-	return enqueueWrite(async () => {
+	return enqueueWrite(root, async () => {
 		// Line-buffer progress: decode streaming (multi-byte sequences may
 		// split across pipe reads) and emit whole lines so consumers never
 		// see half a line or a split character (CodeRabbit U0–U8 review).
