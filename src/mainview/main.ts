@@ -12,6 +12,7 @@ import {
 } from "./diff-view-wrapper";
 import { mountFileTree, type TreeHandle } from "./file-tree-wrapper";
 import { statusToTreeEntries } from "./git-status-mapping";
+import { FALLBACK_ROW_HEIGHT, windowRows } from "./history-window";
 import { buildStagedPatch } from "./patch-surgery";
 import {
 	getPlatform,
@@ -354,8 +355,7 @@ async function openRepo(root: string): Promise<string> {
 	store.set({ ...store.get(), root, info, status });
 	void refreshDiff();
 	refreshBranches();
-	historyList.innerHTML = "";
-	historyLoaded = 0;
+	historyCommits = [];
 	refreshHistory();
 	return `${info.branch} · ${info.head.slice(0, 7)} · ${status.entries.length} change(s)`;
 }
@@ -480,8 +480,7 @@ commitBtn.addEventListener("click", () => {
 			writeError.textContent = "";
 			// A commit moves HEAD: every diff range can change.
 			refreshBranches();
-			historyList.innerHTML = "";
-			historyLoaded = 0;
+			historyCommits = [];
 			refreshHistory();
 			return refreshStatus().then(() => refreshDiff());
 		})
@@ -558,11 +557,16 @@ pullBtn.addEventListener("click", () => void runRemote("pull"));
 fetchBtn.addEventListener("click", () => void runRemote("fetch"));
 cancelBtn.addEventListener("click", () => remoteController?.abort());
 
-// ---- U6: history pane + branch operations ----
+// ---- U6 history pane + A3 windowing ----
+// The commit array grows unboundedly (cheap objects); only a bounded row
+// window lives in the DOM (post-v1 Unit A3). All renders go through
+// renderHistoryWindow so selection and spacers stay consistent.
 const HISTORY_PAGE = 50;
-let historyLoaded = 0;
+let historyCommits: LogCommit[] = [];
+let selectedOid: string | null = null;
+let historyScrollQueued = false;
 
-function appendCommitRow(commit: LogCommit): void {
+function buildCommitRow(commit: LogCommit): HTMLElement {
 	const item = document.createElement("li");
 	item.className = "history-row";
 	item.dataset.oid = commit.oid;
@@ -577,7 +581,51 @@ function appendCommitRow(commit: LogCommit): void {
 			: commit.subject;
 	item.append(short, subject);
 	item.addEventListener("click", () => viewCommit(commit.oid));
-	historyList.appendChild(item);
+	return item;
+}
+
+function historyRowHeight(): number {
+	const first = historyList.querySelector(".history-row");
+	const measured = first instanceof HTMLElement ? first.offsetHeight : 0;
+	return measured > 0 ? measured : FALLBACK_ROW_HEIGHT;
+}
+
+/** Rebuilds the visible row window; DOM rows stay bounded (~60 max). */
+function renderHistoryWindow(): void {
+	const total = historyCommits.length;
+	const rowH = historyRowHeight();
+	const win = windowRows(
+		total,
+		historyList.scrollTop,
+		rowH,
+		historyList.clientHeight,
+	);
+	historyList.innerHTML = "";
+	if (total === 0) return;
+	const top = document.createElement("li");
+	top.className = "history-spacer";
+	top.setAttribute("aria-hidden", "true");
+	top.style.height = `${win.topPad}px`;
+	historyList.append(top);
+	for (let i = win.start; i < win.end; i++) {
+		const row = buildCommitRow(historyCommits[i]);
+		if (historyCommits[i].oid === selectedOid) row.classList.add("selected");
+		historyList.append(row);
+	}
+	const bottom = document.createElement("li");
+	bottom.className = "history-spacer";
+	bottom.setAttribute("aria-hidden", "true");
+	bottom.style.height = `${win.bottomPad}px`;
+	historyList.append(bottom);
+}
+
+function queueHistoryWindowRender(): void {
+	if (historyScrollQueued) return;
+	historyScrollQueued = true;
+	requestAnimationFrame(() => {
+		historyScrollQueued = false;
+		renderHistoryWindow();
+	});
 }
 
 /** Streams the next page of history; append=false restarts the list. */
@@ -595,27 +643,28 @@ function refreshHistory(append = false): void {
 	historyLoading = true;
 	olderBtn.disabled = true;
 	if (!append) {
-		historyLoaded = 0;
-		historyList.innerHTML = "";
+		historyCommits = [];
+		renderHistoryWindow();
 	}
 	void getPlatform()
 		.gitLog(
 			root,
-			{ limit: HISTORY_PAGE, skip: append ? historyLoaded : 0 },
+			{ limit: HISTORY_PAGE, skip: append ? historyCommits.length : 0 },
 			(commit) => {
-				appendCommitRow(commit);
-				historyLoaded += 1;
+				historyCommits.push(commit);
 			},
 		)
 		.then(({ count }) => {
 			olderBtn.hidden = count < HISTORY_PAGE;
+			renderHistoryWindow();
 		})
 		.catch((error) => {
 			olderBtn.hidden = true;
-			historyList.innerHTML = "";
+			historyCommits = [];
+			renderHistoryWindow();
 			const item = document.createElement("li");
 			item.textContent = `error: ${String(error)}`;
-			historyList.appendChild(item);
+			historyList.append(item);
 		})
 		.finally(() => {
 			// Serializes Older clicks: no duplicate pages from double-clicks
@@ -658,9 +707,8 @@ function viewCommit(oid: string): void {
 		diffTo: oid,
 	});
 	void refreshDiff();
-	for (const row of historyList.children) {
-		row.classList.toggle("selected", (row as HTMLElement).dataset.oid === oid);
-	}
+	selectedOid = oid;
+	renderHistoryWindow();
 }
 
 /** After the worktree itself changed (branch switch or successful pull):
@@ -678,8 +726,7 @@ function afterWorktreeChange(): Promise<void> {
 		})
 		.then(() => {
 			refreshBranches();
-			historyList.innerHTML = "";
-			historyLoaded = 0;
+			historyCommits = [];
 			refreshHistory();
 			return refreshDiff();
 		});
@@ -713,6 +760,9 @@ branchCreateBtn.addEventListener("click", () => {
 });
 
 olderBtn.addEventListener("click", () => refreshHistory(true));
+historyList.addEventListener("scroll", queueHistoryWindowRender, {
+	passive: true,
+});
 
 /** Samples requestAnimationFrame gaps while stepping the diff scroll — a
  * cheap jank proxy for the scroll-smoothness budget. SMOKE-only. */
