@@ -1,0 +1,77 @@
+# Product CI: the full local gate plus a Linux stable build, on every push
+# and pull request. Ubuntu-only: Windows/macOS distribution is post-v1, so a
+# wider matrix would be decorative, not coverage (RON-316). No secrets: the
+# build needs no signing, no store, no update host.
+
+name: product
+
+on:
+  push:
+    branches: [dev, master, "feat/**", "fix/**", "docs/**", "chore/**"]
+  pull_request:
+
+# A newer push supersedes the run in flight — except the dev↔master sync,
+# which owns its own never-cancel concurrency (see sync-dev-to-master.yml).
+concurrency:
+  group: product-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  check:
+    name: typecheck + lint + tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Bun 1.4.0
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.0"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Gate (tsc + biome + bun test)
+        run: bun run check
+
+  build:
+    name: Linux stable build
+    runs-on: ubuntu-latest
+    needs: [check]
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Bun 1.4.0
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.0"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install system webview headers
+        run: sudo apt-get update -qq && sudo apt-get install -qy libwebkit2gtk-4.1-dev
+
+      - name: Install Hutch
+        run: curl -fsSL https://hutch.blackboard.sh/hutch/install.sh | sh
+
+      - name: Stable build
+        run: hutch run build
+
+      - name: Report payload
+        run: |
+          payload="$(ls build/stable-linux-x64/hmmagainagain/Resources/*.tar.zst | head -1)"
+          bytes="$(stat -c %s "$payload")"
+          echo "payload=$payload bytes=$bytes ($(awk "BEGIN {printf \"%.1f\", $bytes/1024/1024}") MiB)"
