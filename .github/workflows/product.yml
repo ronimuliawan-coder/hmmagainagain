@@ -38,6 +38,14 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Install Hutch
+        run: curl -fsSL https://hutch.blackboard.sh/hutch/install.sh | sh
+
+      - name: Prepare Electrobun devkit
+        # Generates .hutch/devkit (tsconfig base + electrobun types) that
+        # tsconfig.json extends and tsc requires. Gitignored by design.
+        run: hutch electrobun prepare
+
       - name: Gate (tsc + biome + bun test)
         run: bun run check
 
