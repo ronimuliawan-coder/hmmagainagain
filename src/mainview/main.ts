@@ -1,4 +1,6 @@
 import "./style.css";
+import { resolveTheme } from "@pierre/diffs";
+import { themeToTreeStyles } from "@pierre/trees";
 import type {
 	GitDiffOptions,
 	GitStatus,
@@ -21,6 +23,13 @@ import {
 	sendSelfTestResult,
 } from "./platform";
 import { createStore } from "./store";
+import {
+	isThemeVariant,
+	knownThemeNames,
+	parseStoredTheme,
+	pierreThemeName,
+	type ShellTheme,
+} from "./theme-names";
 
 // U8b cold-start proxy: first compositor frame in the webview, on the shared
 // Date.now wall clock. Surfaces in main-process output only if Electrobun
@@ -63,6 +72,7 @@ const repoInput = byId<HTMLInputElement>("repo-path");
 const openBtn = byId<HTMLButtonElement>("open-btn");
 const browseBtn = byId<HTMLButtonElement>("browse-btn");
 const themeBtn = byId<HTMLButtonElement>("theme-btn");
+const themeVariant = byId<HTMLSelectElement>("theme-variant");
 const diffContainer = byId<HTMLDivElement>("diff-container");
 const diffInfo = byId<HTMLSpanElement>("diff-info");
 const rangeButtons = [
@@ -293,7 +303,12 @@ function diffOptionsFor(state: AppState): GitDiffOptions {
 async function refreshDiff(): Promise<void> {
 	const state = store.get();
 	if (!state.root) return;
-	if (!diffView) diffView = mountDiffView(diffContainer, handleDiffSelection);
+	if (!diffView)
+		diffView = mountDiffView(
+			diffContainer,
+			handleDiffSelection,
+			codeThemeNames(),
+		);
 	const seq = ++diffSeq;
 	// A2: superseded diffs die instead of racing. The previous request is
 	// aborted before the new one starts; the seq guard below stays as the
@@ -353,7 +368,13 @@ async function openRepo(root: string): Promise<string> {
 	]);
 	if (!tree) tree = mountFileTree(treeContainer);
 	tree.setPaths(paths);
-	if (!diffView) diffView = mountDiffView(diffContainer, handleDiffSelection);
+	applyTreeTheme();
+	if (!diffView)
+		diffView = mountDiffView(
+			diffContainer,
+			handleDiffSelection,
+			codeThemeNames(),
+		);
 
 	// Watcher-driven refresh: one subscription per open repository.
 	if (watcher) await watcher.stop();
@@ -512,37 +533,95 @@ commitBtn.addEventListener("click", () => {
 
 renderRecents();
 
-// ---- Theme (PRD SHOULD: light/dark). CodeView follows the page
-// color-scheme via light-dark(), so one data-theme switch covers the
-// shell and the diff pane — no new dependency.
-function applyTheme(theme: "light" | "dark"): void {
-	document.documentElement.dataset.theme = theme;
-	themeBtn.textContent = theme === "dark" ? "Light" : "Dark";
-	themeBtn.setAttribute("aria-pressed", String(theme === "light"));
+// ---- Theme (PRD SHOULD: light/dark + Pierre variants). CodeView follows
+// the page color-scheme via light-dark(); the pool takes variant names that
+// resolve through diffs' theming catalog, and the tree gets themeToTreeStyles
+// on its host container (custom properties inherit into the shadow tree).
+let shellTheme: ShellTheme = { scheme: "dark", variant: "default" };
+
+/** CodeView pool names, falling back to the canonical pair when the
+ * catalog no longer knows a variant (upstream rename resilience). */
+function codeThemeNames(): { light: string; dark: string } {
+	const known = knownThemeNames();
+	const pick = (scheme: "light" | "dark"): string => {
+		const name = pierreThemeName(scheme, shellTheme.variant);
+		return known.includes(name) ? name : `pierre-${scheme}`;
+	};
+	return { light: pick("light"), dark: pick("dark") };
+}
+
+function persistTheme(): void {
 	try {
-		localStorage.setItem(THEME_KEY, theme);
+		localStorage.setItem(THEME_KEY, JSON.stringify(shellTheme));
 	} catch {
 		// storage unavailable — theme is best-effort
 	}
 }
 
+/** Applies the resolved Pierre theme to the file tree; failures keep the
+ * tree's defaults (theme must never break repo browsing). */
+function applyTreeTheme(): void {
+	if (!tree) return;
+	const name = pierreThemeName(shellTheme.scheme, shellTheme.variant);
+	void resolveTheme(name)
+		.then((resolved) => tree?.setTheme(themeToTreeStyles(resolved)))
+		.catch(() => {});
+}
+
+function applyTheme(next: ShellTheme): void {
+	shellTheme = next;
+	document.documentElement.dataset.theme = next.scheme;
+	themeBtn.textContent = next.scheme === "dark" ? "Light" : "Dark";
+	themeBtn.setAttribute("aria-pressed", String(next.scheme === "light"));
+	themeVariant.value = next.variant;
+	persistTheme();
+	// The worker pool binds theme names at creation: remount the diff view
+	// so the variant takes effect, restoring patch + style after.
+	if (diffView) {
+		const style = store.get().diffStyle;
+		diffView.destroy();
+		diffView = mountDiffView(
+			diffContainer,
+			handleDiffSelection,
+			codeThemeNames(),
+		);
+		if (lastPatch) diffView.setPatch(lastPatch);
+		diffView.setDiffStyle(style);
+	}
+	applyTreeTheme();
+}
+
 {
-	let initial: "light" | "dark" = "dark";
+	let stored: string | null = null;
 	try {
-		const stored = localStorage.getItem(THEME_KEY);
-		if (stored === "light" || stored === "dark") initial = stored;
-		else if (matchMedia("(prefers-color-scheme: light)").matches)
-			initial = "light";
+		stored = localStorage.getItem(THEME_KEY);
 	} catch {
 		// storage unavailable — fall back to dark
 	}
-	applyTheme(initial);
+	shellTheme = parseStoredTheme(stored);
+	if (stored === null) {
+		try {
+			if (matchMedia("(prefers-color-scheme: light)").matches) {
+				shellTheme = { ...shellTheme, scheme: "light" };
+			}
+		} catch {
+			// matchMedia unavailable — fall back to dark
+		}
+	}
+	applyTheme(shellTheme);
 }
 
 themeBtn.addEventListener("click", () => {
-	applyTheme(
-		document.documentElement.dataset.theme === "light" ? "dark" : "light",
-	);
+	applyTheme({
+		...shellTheme,
+		scheme: shellTheme.scheme === "light" ? "dark" : "light",
+	});
+});
+
+themeVariant.addEventListener("change", () => {
+	if (isThemeVariant(themeVariant.value)) {
+		applyTheme({ ...shellTheme, variant: themeVariant.value });
+	}
 });
 
 // ---- U7: push/pull/fetch ----
