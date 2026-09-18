@@ -48,6 +48,7 @@ function buildRow(
 ): HTMLElement {
 	const item = document.createElement("li");
 	item.dataset.path = entry.path;
+	item.tabIndex = 0;
 	const active = stagedSide ? entry.indexStatus : entry.worktreeStatus;
 
 	const check = document.createElement("input");
@@ -75,6 +76,22 @@ function buildRow(
 	item.addEventListener("click", (event) => {
 		if ((event.target as HTMLElement | null)?.closest("input")) return;
 		callbacks.onJump(entry.path);
+	});
+	// Arrows walk rows, Enter jumps the diff; Space toggles the focused
+	// checkbox natively.
+	item.addEventListener("keydown", (event) => {
+		if (event.key === "Enter") {
+			event.preventDefault();
+			callbacks.onJump(entry.path);
+			return;
+		}
+		if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+		event.preventDefault();
+		const parent = item.parentElement;
+		if (!parent) return;
+		const rows = [...parent.querySelectorAll("li[data-path]")] as HTMLElement[];
+		const next = rows.indexOf(item) + (event.key === "ArrowDown" ? 1 : -1);
+		rows[Math.min(rows.length - 1, Math.max(0, next))]?.focus();
 	});
 	return item;
 }
@@ -109,7 +126,8 @@ export function renderStatusList(
 	if (entries.length === 0) {
 		const empty = document.createElement("li");
 		empty.className = "status-empty";
-		empty.textContent = "working tree clean";
+		empty.textContent =
+			"Working tree clean — pick a commit in History to review.";
 		list.append(empty);
 		return;
 	}

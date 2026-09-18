@@ -133,4 +133,20 @@ describe("mountFileTree (component, jsdom)", () => {
 		expect(() => tree.destroy()).not.toThrow();
 		container.remove();
 	});
+
+	test("setSearch filters rows through the search session", async () => {
+		const { container, tree } = mount();
+		tree.setPaths(FIXTURE_PATHS);
+		await flushDom();
+		const before = tree.getRowCount();
+		tree.setSearch("Button");
+		await flushDom();
+		expect(tree.getRowCount()).toBeLessThan(before);
+		expect(tree.getRowCount()).toBeGreaterThan(0);
+		tree.setSearch(null);
+		await flushDom();
+		expect(tree.getRowCount()).toBe(before);
+		tree.destroy();
+		container.remove();
+	});
 });

@@ -40,6 +40,7 @@
           <button type="button" data-tab="history" role="tab">History</button>
         </div>
         <section id="tab-files" data-tabpane="files" role="tabpanel" aria-label="Worktree files">
+          <input id="tree-filter" placeholder="Filter files  ( / )" aria-label="Filter files" />
           <div id="tree-container"></div>
         </section>
         <section id="tab-changes" data-tabpane="changes" role="tabpanel" aria-label="Changed files" hidden>
@@ -72,6 +73,15 @@
         </footer>
       </aside>
       <section id="diff-pane">
+        <div id="welcome">
+          <h2>hmmagainagain</h2>
+          <p>Review, stage, and ship — without dropping to the terminal.</p>
+          <div id="welcome-actions">
+            <button type="button" id="welcome-browse">Browse…</button>
+          </div>
+          <div id="welcome-recents"></div>
+          <p class="pane-hint">Shortcuts: 1 2 3 switch tabs · / filters files · ↑ ↓ move · Enter opens</p>
+        </div>
         <div id="diff-toolbar">
           <button type="button" data-diff-range="worktree">Worktree</button>
           <button type="button" data-diff-range="staged">Staged</button>

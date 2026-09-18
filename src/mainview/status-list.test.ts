@@ -54,7 +54,7 @@ describe("renderStatusList", () => {
 	test("empty status renders the clean message", () => {
 		const { list } = render([]);
 		expect(list.children).toHaveLength(1);
-		expect(list.textContent).toContain("working tree clean");
+		expect(list.textContent).toContain("Working tree clean");
 	});
 
 	test("splits sides with headers, counts, and bulk actions", () => {
@@ -104,5 +104,33 @@ describe("renderStatusList", () => {
 		const check = list.querySelector("input") as HTMLInputElement;
 		check.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
 		expect(calls).toEqual([]);
+	});
+
+	test("arrows walk rows and Enter jumps the diff", () => {
+		const { list, calls } = render([
+			{ path: "a.txt", indexStatus: ".", worktreeStatus: "M" },
+			{ path: "b.txt", indexStatus: ".", worktreeStatus: "M" },
+		]);
+		document.body.append(list);
+		try {
+			const rows = [...list.querySelectorAll("li[data-path]")] as HTMLElement[];
+			rows[0].focus();
+			rows[0].dispatchEvent(
+				new dom.window.KeyboardEvent("keydown", {
+					key: "ArrowDown",
+					bubbles: true,
+				}),
+			);
+			expect(document.activeElement).toBe(rows[1]);
+			rows[1].dispatchEvent(
+				new dom.window.KeyboardEvent("keydown", {
+					key: "Enter",
+					bubbles: true,
+				}),
+			);
+			expect(calls).toContain("jump:b.txt");
+		} finally {
+			list.remove();
+		}
 	});
 });

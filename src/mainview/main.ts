@@ -61,6 +61,11 @@ const openBtn = byId<HTMLButtonElement>("open-btn");
 const browseBtn = byId<HTMLButtonElement>("browse-btn");
 const themeBtn = byId<HTMLButtonElement>("theme-btn");
 const themeVariant = byId<HTMLSelectElement>("theme-variant");
+const treeFilter = byId<HTMLInputElement>("tree-filter");
+const welcome = byId<HTMLDivElement>("welcome");
+const welcomeRecents = byId<HTMLDivElement>("welcome-recents");
+const welcomeBrowse = byId<HTMLButtonElement>("welcome-browse");
+const diffToolbar = byId<HTMLDivElement>("diff-toolbar");
 const changesCount = byId<HTMLSpanElement>("changes-count");
 const tabButtons = [
 	...document.querySelectorAll<HTMLButtonElement>("#sidebar-tabs [data-tab]"),
@@ -194,6 +199,7 @@ function renderRepoInfo(info: RepoInfo, status: GitStatus): void {
 
 /** Single render path: every state change paints through here. */
 function render(state: AppState): void {
+	renderWelcome(state.root);
 	if (state.status) {
 		renderStatusList(statusList, state.status.entries, {
 			onToggle: (path, unstage) => void runWriteAction(path, unstage),
@@ -333,6 +339,8 @@ async function openRepo(root: string): Promise<string> {
 	]);
 	if (!tree) tree = mountFileTree(treeContainer);
 	tree.setPaths(paths);
+	treeFilter.value = "";
+	tree.setSearch(null);
 	applyPierreTheme();
 	if (!diffView)
 		diffView = mountDiffView(
@@ -508,6 +516,8 @@ commitBtn.addEventListener("click", () => {
 });
 
 renderRecents();
+// Initial paint before any store change: welcome owns the empty state.
+renderWelcome(store.get().root);
 
 // ---- Theme (PRD SHOULD: light/dark + Pierre variants). CodeView follows
 // the page color-scheme via light-dark(); the pool takes variant names that
@@ -646,6 +656,63 @@ for (const button of tabButtons) {
 	});
 }
 
+// ---- Welcome (no repository open yet) ----
+function renderWelcome(root: string): void {
+	const open = root !== "";
+	welcome.hidden = open;
+	diffToolbar.hidden = !open;
+	diffContainer.hidden = !open;
+	if (open) return;
+	welcomeRecents.innerHTML = "";
+	for (const recent of readRecents().recents) {
+		const item = document.createElement("button");
+		item.type = "button";
+		item.className = "welcome-recent";
+		item.textContent = recent;
+		item.title = recent;
+		item.addEventListener("click", () => {
+			repoInput.value = recent;
+			openBtn.click();
+		});
+		welcomeRecents.append(item);
+	}
+}
+
+welcomeBrowse.addEventListener("click", () => {
+	if (!browseBtn.hidden) browseBtn.click();
+	else {
+		repoInput.focus();
+		repoInfo.textContent = "Type a repository path, then Open.";
+	}
+});
+
+// ---- Tree filter + global shortcuts ----
+// Typing anywhere except a text control: / filters files, 1/2/3 switch tabs.
+treeFilter.addEventListener("input", () => {
+	tree?.setSearch(treeFilter.value.trim() || null);
+});
+
+document.addEventListener("keydown", (event) => {
+	const target = event.target as HTMLElement | null;
+	const typing =
+		target instanceof HTMLInputElement ||
+		target instanceof HTMLTextAreaElement ||
+		target instanceof HTMLSelectElement ||
+		target?.isContentEditable;
+	if (typing || event.ctrlKey || event.metaKey || event.altKey) return;
+	if (event.key === "/") {
+		event.preventDefault();
+		setTab("files");
+		treeFilter.focus();
+	} else if (event.key === "1") {
+		setTab("files");
+	} else if (event.key === "2") {
+		setTab("changes");
+	} else if (event.key === "3") {
+		setTab("history");
+	}
+});
+
 // ---- U7: push/pull/fetch ----
 let remoteOpRunning = false;
 let remoteController: AbortController | null = null;
@@ -770,7 +837,17 @@ function renderHistoryWindow(): void {
 		historyList.clientHeight,
 	);
 	historyList.innerHTML = "";
-	if (total === 0) return;
+	if (total === 0) {
+		// Fresh repos (unborn HEAD) have no commits; without an open repo
+		// the welcome overlay owns the empty state instead.
+		if (store.get().root) {
+			const empty = document.createElement("div");
+			empty.className = "history-empty";
+			empty.textContent = "No commits yet.";
+			historyList.append(empty);
+		}
+		return;
+	}
 	const top = document.createElement("div");
 	top.className = "history-spacer";
 	top.setAttribute("aria-hidden", "true");
