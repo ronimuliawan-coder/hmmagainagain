@@ -34,6 +34,10 @@ function initRepo(name: string): string {
 	const dir = join(base, name);
 	mkdirSync(dir, { recursive: true });
 	g(dir, "init", "-q", "-b", "main");
+	// Local identity: the differential shell-outs below carry env identity,
+	// but adapter-equivalent paths must not depend on ambient git config.
+	g(dir, "config", "user.email", "fixture@example.test");
+	g(dir, "config", "user.name", "fixture");
 	return dir;
 }
 
