@@ -23,6 +23,7 @@ import {
 	isElectrobun,
 	sendSelfTestResult,
 } from "./platform";
+import { renderStatusList } from "./status-list";
 import { createStore } from "./store";
 import {
 	isThemeVariant,
@@ -51,21 +52,6 @@ function byId<T extends HTMLElement>(id: string): T {
 	if (!element) throw new Error(`missing element #${id}`);
 	return element as T;
 }
-
-// Porcelain letters (?, ., !) can't be CSS class names — slug them instead.
-const STATUS_SLUGS: Record<string, string> = {
-	M: "m",
-	A: "a",
-	D: "d",
-	R: "r",
-	C: "c",
-	U: "u",
-	"?": "untracked",
-	"!": "ignored",
-	".": "clean",
-};
-
-const statusSlug = (letter: string): string => STATUS_SLUGS[letter] ?? "other";
 
 const treeContainer = byId<HTMLDivElement>("tree-container");
 const statusList = byId<HTMLUListElement>("status-list");
@@ -206,45 +192,15 @@ function renderRepoInfo(info: RepoInfo, status: GitStatus): void {
 	fetchBtn.disabled = remoteOpRunning;
 }
 
-function renderStatusList(status: GitStatus): void {
-	statusList.innerHTML = "";
-	if (status.entries.length === 0) {
-		const empty = document.createElement("li");
-		empty.textContent = "working tree clean";
-		statusList.appendChild(empty);
-		return;
-	}
-	for (const entry of status.entries) {
-		const item = document.createElement("li");
-		const active =
-			entry.worktreeStatus !== "." ? entry.worktreeStatus : entry.indexStatus;
-		item.dataset.path = entry.path;
-		item.dataset.staged = entry.indexStatus !== "." ? "yes" : "no";
-		const letter = document.createElement("span");
-		// CSS classes can't carry raw porcelain letters (?, ., !) — slug them.
-		letter.className = `status-letter status-${statusSlug(active)}`;
-		letter.textContent = active;
-		const label = document.createElement("span");
-		label.className = "status-path";
-		label.textContent =
-			entry.renamedFrom !== undefined
-				? `${entry.renamedFrom} → ${entry.path}`
-				: entry.path;
-		const action = document.createElement("button");
-		action.type = "button";
-		action.className = "status-action";
-		action.textContent = entry.indexStatus !== "." ? "unstage" : "stage";
-		action.dataset.actionPath = entry.path;
-		action.dataset.actionKind = entry.indexStatus !== "." ? "unstage" : "stage";
-		item.append(letter, label, action);
-		statusList.appendChild(item);
-	}
-}
-
 /** Single render path: every state change paints through here. */
 function render(state: AppState): void {
 	if (state.status) {
-		renderStatusList(state.status);
+		renderStatusList(statusList, state.status.entries, {
+			onToggle: (path, unstage) => void runWriteAction(path, unstage),
+			onJump: (path) => diffView?.scrollToFile(path),
+			onToggleAll: (unstage) =>
+				void runBulkWrite(state.status?.entries ?? [], unstage),
+		});
 		tree?.setGitStatus(statusToTreeEntries(state.status.entries));
 	}
 	if (state.info && state.status) renderRepoInfo(state.info, state.status);
@@ -458,6 +414,34 @@ async function runWriteAction(path: string, unstage: boolean): Promise<void> {
 	}
 }
 
+/** Stage-all / Unstage-all: one index write for the whole side. Empty is a
+ * no-op (headers only render for non-empty sides, so this is defensive). */
+async function runBulkWrite(
+	entries: readonly {
+		path: string;
+		indexStatus: string;
+		worktreeStatus: string;
+	}[],
+	unstage: boolean,
+): Promise<void> {
+	const { root } = store.get();
+	if (!root) return;
+	const paths = entries
+		.filter((e) => (unstage ? e.indexStatus !== "." : e.worktreeStatus !== "."))
+		.map((e) => e.path);
+	if (paths.length === 0) return;
+	try {
+		if (unstage) await getPlatform().unstagePaths(root, paths);
+		else await getPlatform().stagePaths(root, paths);
+		writeError.textContent = "";
+		await refreshStatus();
+		const { diffMode } = store.get();
+		if (diffMode === "worktree" || diffMode === "staged") await refreshDiff();
+	} catch (error) {
+		showWriteError(error);
+	}
+}
+
 for (const button of rangeButtons) {
 	button.addEventListener("click", () => {
 		const mode = button.dataset.diffRange as DiffMode | undefined;
@@ -484,23 +468,6 @@ for (const [button, style] of [
 		diffView?.setDiffStyle(style);
 	});
 }
-
-// Clicking a changed file jumps the diff to that file's item; the stage/
-// unstage action button writes the index instead.
-statusList.addEventListener("click", (event) => {
-	const target = event.target as HTMLElement | null;
-	const action = target?.closest<HTMLButtonElement>("[data-action-path]");
-	if (action) {
-		void runWriteAction(
-			action.dataset.actionPath ?? "",
-			action.dataset.actionKind === "unstage",
-		);
-		return;
-	}
-	const item = target?.closest("li");
-	const path = item?.dataset.path;
-	if (path) diffView?.scrollToFile(path);
-});
 
 stageSelectedBtn.addEventListener("click", () => {
 	const { root } = store.get();

@@ -1,0 +1,140 @@
+// Changed-files list: Unstaged/Staged groups with stage checkboxes.
+// Pure DOM rendering (jsdom-tested); main.ts owns the write queue behind
+// the callbacks. A both-modified file appears in both groups — that is git
+// semantics, not duplication: each row acts on its own side.
+
+// Porcelain letters (?, ., !) can't be CSS class names — slug them instead.
+const STATUS_SLUGS: Record<string, string> = {
+	M: "m",
+	A: "a",
+	D: "d",
+	R: "r",
+	C: "c",
+	U: "u",
+	"?": "untracked",
+	"!": "ignored",
+	".": "clean",
+};
+
+export const statusSlug = (letter: string): string =>
+	STATUS_SLUGS[letter] ?? "other";
+
+export interface StatusListEntry {
+	path: string;
+	indexStatus: string;
+	worktreeStatus: string;
+	renamedFrom?: string;
+}
+
+export interface StatusListCallbacks {
+	/** Checkbox flipped: stage (unstage=false) or unstage a path. */
+	onToggle: (path: string, unstage: boolean) => void;
+	/** Row body clicked: jump the diff view to the file. */
+	onJump: (path: string) => void;
+	/** Group header button: stage/unstage every path on that side. */
+	onToggleAll: (unstage: boolean) => void;
+}
+
+function displayPath(entry: StatusListEntry): string {
+	return entry.renamedFrom !== undefined
+		? `${entry.renamedFrom} → ${entry.path}`
+		: entry.path;
+}
+
+function buildRow(
+	entry: StatusListEntry,
+	stagedSide: boolean,
+	callbacks: StatusListCallbacks,
+): HTMLElement {
+	const item = document.createElement("li");
+	item.dataset.path = entry.path;
+	const active = stagedSide ? entry.indexStatus : entry.worktreeStatus;
+
+	const check = document.createElement("input");
+	check.type = "checkbox";
+	check.className = "status-check";
+	check.checked = stagedSide;
+	check.setAttribute(
+		"aria-label",
+		`${stagedSide ? "Unstage" : "Stage"} ${entry.path}`,
+	);
+	check.addEventListener("change", () => {
+		callbacks.onToggle(entry.path, stagedSide);
+	});
+
+	const letter = document.createElement("span");
+	// CSS classes can't carry raw porcelain letters (?, ., !) — slug them.
+	letter.className = `status-letter status-${statusSlug(active)}`;
+	letter.textContent = active;
+
+	const label = document.createElement("span");
+	label.className = "status-path";
+	label.textContent = displayPath(entry);
+
+	item.append(check, letter, label);
+	item.addEventListener("click", (event) => {
+		if ((event.target as HTMLElement | null)?.closest("input")) return;
+		callbacks.onJump(entry.path);
+	});
+	return item;
+}
+
+function buildGroupHeader(
+	title: string,
+	count: number,
+	actionLabel: string,
+	unstage: boolean,
+	callbacks: StatusListCallbacks,
+): HTMLElement {
+	const header = document.createElement("li");
+	header.className = "status-group-header";
+	const name = document.createElement("span");
+	name.className = "status-group-title";
+	name.textContent = `${title} (${count})`;
+	const action = document.createElement("button");
+	action.type = "button";
+	action.className = "status-action";
+	action.textContent = actionLabel;
+	action.addEventListener("click", () => callbacks.onToggleAll(unstage));
+	header.append(name, action);
+	return header;
+}
+
+export function renderStatusList(
+	list: HTMLUListElement,
+	entries: readonly StatusListEntry[],
+	callbacks: StatusListCallbacks,
+): void {
+	list.innerHTML = "";
+	if (entries.length === 0) {
+		const empty = document.createElement("li");
+		empty.className = "status-empty";
+		empty.textContent = "working tree clean";
+		list.append(empty);
+		return;
+	}
+	const unstaged = entries.filter((e) => e.worktreeStatus !== ".");
+	const staged = entries.filter((e) => e.indexStatus !== ".");
+	if (unstaged.length > 0) {
+		list.append(
+			buildGroupHeader(
+				"Unstaged",
+				unstaged.length,
+				"Stage all",
+				false,
+				callbacks,
+			),
+		);
+		for (const entry of unstaged) {
+			list.append(buildRow(entry, false, callbacks));
+		}
+	}
+	if (staged.length > 0) {
+		list.append(
+			buildGroupHeader("Staged", staged.length, "Unstage all", true, callbacks),
+		);
+		for (const entry of staged) {
+			list.append(buildRow(entry, true, callbacks));
+		}
+	}
+}

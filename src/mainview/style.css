@@ -379,9 +379,47 @@ textarea {
 
 #status-list li {
 	display: flex;
+	align-items: center;
 	gap: 8px;
-	padding: 3px 0;
+	padding: 3px 6px;
 	border-bottom: 1px solid var(--border);
+}
+
+#status-list li[data-path] {
+	cursor: pointer;
+	border-radius: 6px;
+}
+
+#status-list li[data-path]:hover {
+	background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.status-group-header {
+	justify-content: space-between;
+	padding-top: 8px;
+	font-size: 0.72rem;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: var(--muted);
+}
+
+.status-group-title {
+	font-weight: 600;
+}
+
+.status-check {
+	accent-color: var(--accent);
+	width: 14px;
+	height: 14px;
+	margin: 0;
+	flex: none;
+	cursor: pointer;
+}
+
+.status-empty {
+	color: var(--muted);
+	font-size: 0.85rem;
+	padding: 8px 0;
 }
 
 .status-letter {
