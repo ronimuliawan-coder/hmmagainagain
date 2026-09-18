@@ -5,179 +5,40 @@
 body {
 	margin: 0;
 	padding: 0;
-	font-family:
-		-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu,
-		Cantarell, sans-serif;
-}
-
-#app {
-	min-height: 100vh;
-}
-
-main {
-	min-height: 100vh;
-	background: linear-gradient(135deg, #333 0%, #555 100%);
-	padding: 40px 20px;
-}
-
-.container {
-	max-width: 800px;
-	margin: 0 auto;
-}
-
-h1 {
-	color: white;
-	font-size: 3rem;
-	text-align: center;
-	margin-bottom: 8px;
-	text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-}
-
-.subtitle {
-	color: rgba(255, 255, 255, 0.9);
-	font-size: 1.25rem;
-	text-align: center;
-	margin-top: 0;
-	margin-bottom: 40px;
-	text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-}
-
-.card {
-	background: white;
-	border-radius: 12px;
-	padding: 30px;
-	margin-bottom: 20px;
-	box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
-}
-
-h2 {
-	color: #333;
-	margin-top: 0;
-	margin-bottom: 15px;
-}
-
-p {
-	color: #666;
-	line-height: 1.6;
-}
-
-.button-group {
-	display: flex;
-	gap: 12px;
-	margin-top: 20px;
-}
-
-button {
-	padding: 12px 24px;
-	font-size: 1rem;
-	font-weight: 500;
-	border: none;
-	border-radius: 8px;
-	cursor: pointer;
-	transition: all 0.2s ease;
-}
-
-button.primary {
-	background: #333;
-	color: white;
-	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-}
-
-button.primary:hover {
-	background: #222;
-	transform: translateY(-1px);
-	box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
-}
-
-button.secondary {
-	background: #f0f0f0;
-	color: #666;
-}
-
-button.secondary:hover {
-	background: #e0e0e0;
-}
-
-ul {
-	list-style: none;
-	padding: 0;
-	margin: 0;
-}
-
-li {
-	display: flex;
-	align-items: flex-start;
-	gap: 10px;
-	padding: 10px 0;
-	color: #666;
-}
-
-.number {
-	color: #333;
-	font-weight: bold;
-}
-
-code {
-	background: #f5f5f5;
-	color: #555;
-	padding: 2px 8px;
-	border-radius: 4px;
-	font-family: "Monaco", "Menlo", monospace;
-	font-size: 0.9em;
-}
-
-.stack-grid {
-	display: grid;
-	grid-template-columns: repeat(4, 1fr);
-	gap: 15px;
-}
-
-.stack-item {
-	text-align: center;
-	padding: 20px 10px;
-	background: #fafafa;
-	border-radius: 8px;
-}
-
-.icon {
-	display: block;
-	font-size: 2rem;
-	margin-bottom: 8px;
-}
-
-.footer {
-	text-align: center;
-	color: rgba(255, 255, 255, 0.8);
-	margin-top: 30px;
-	padding: 20px;
-	background: rgba(255, 255, 255, 0.1);
-	border-radius: 8px;
-	backdrop-filter: blur(10px);
-}
-
-.footer p {
-	color: inherit;
-	margin: 0;
-}
-
-.footer code {
-	background: rgba(255, 255, 255, 0.2);
-	color: white;
-}
-
-@media (max-width: 600px) {
-	.stack-grid {
-		grid-template-columns: repeat(2, 1fr);
-	}
-}
-
-/* ---- U3 app shell ---- */
-body {
-	margin: 0;
 	font-family: system-ui, sans-serif;
 	background: #14161a;
 	color: #e6e6e6;
 }
+
+/* Shared shell controls — one small dark base; panes override where needed. */
+button {
+	font: inherit;
+	padding: 4px 14px;
+	font-size: 0.8rem;
+	border-radius: 5px;
+	border: 1px solid #2a2e34;
+	background: #101215;
+	color: #e6e6e6;
+	cursor: pointer;
+}
+
+button:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+
+input,
+select,
+textarea {
+	background: #101215;
+	color: inherit;
+	border: 1px solid #2a2e34;
+	border-radius: 6px;
+	padding: 6px 8px;
+	font: inherit;
+}
+
+/* ---- App shell (dark) ---- */
 
 #topbar {
 	display: flex;
@@ -195,11 +56,6 @@ body {
 #repo-path {
 	flex: 1;
 	min-width: 220px;
-	padding: 6px 8px;
-	border-radius: 6px;
-	border: 1px solid #2a2e34;
-	background: #101215;
-	color: inherit;
 }
 
 #repo-info {
@@ -210,8 +66,15 @@ body {
 
 #shell {
 	display: grid;
-	grid-template-columns: minmax(240px, 0.8fr) minmax(240px, 0.8fr) 2fr;
+	grid-template-columns:
+		minmax(200px, 0.8fr) minmax(220px, 0.8fr) minmax(0, 2.2fr)
+		minmax(220px, 0.9fr);
 	height: calc(100vh - 49px);
+}
+
+#shell > section {
+	min-width: 0;
+	min-height: 0;
 }
 
 #tree-pane,
@@ -223,6 +86,7 @@ body {
 #status-pane {
 	display: flex;
 	flex-direction: column;
+	min-height: 0;
 	padding: 8px 12px;
 }
 
@@ -270,6 +134,7 @@ body {
 
 #status-list {
 	flex: 1;
+	min-height: 0;
 	overflow: auto;
 }
 
@@ -284,12 +149,6 @@ body {
 #commit-message {
 	resize: vertical;
 	min-height: 48px;
-	background: #101215;
-	color: inherit;
-	border: 1px solid #2a2e34;
-	border-radius: 6px;
-	padding: 6px 8px;
-	font: inherit;
 }
 
 #write-error {
@@ -311,21 +170,6 @@ body {
 #staged-count {
 	font-size: 0.78rem;
 	color: #9aa4ae;
-}
-
-#commit-actions button {
-	padding: 4px 14px;
-	font-size: 0.8rem;
-	border-radius: 5px;
-	border: 1px solid #2a2e34;
-	background: #101215;
-	color: #e6e6e6;
-	cursor: pointer;
-}
-
-#commit-actions button:disabled {
-	opacity: 0.4;
-	cursor: default;
 }
 
 .status-action {
@@ -369,11 +213,7 @@ body {
 #diff-toolbar button {
 	padding: 3px 10px;
 	font-size: 0.78rem;
-	border-radius: 5px;
-	border: 1px solid #2a2e34;
-	background: #101215;
 	color: #9aa4ae;
-	cursor: pointer;
 }
 
 #diff-toolbar button.active {
@@ -385,10 +225,6 @@ body {
 	width: 90px;
 	padding: 3px 6px;
 	font-size: 0.78rem;
-	border-radius: 5px;
-	border: 1px solid #2a2e34;
-	background: #101215;
-	color: inherit;
 }
 
 #diff-info {
@@ -406,11 +242,13 @@ body {
 }
 
 #tree-pane h2,
-#status-pane h2 {
+#status-pane h2,
+#history-pane h2 {
 	font-size: 0.8rem;
 	text-transform: uppercase;
 	letter-spacing: 0.08em;
 	color: #9aa4ae;
+	margin: 0 0 8px;
 }
 
 #tree-container {
