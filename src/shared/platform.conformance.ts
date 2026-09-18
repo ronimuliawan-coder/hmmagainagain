@@ -124,17 +124,17 @@ export function runConformance(
 			const first = await makePlatform().gitLog(
 				fixture.repoRoot,
 				{ limit: 1 },
-				(commit) => firstPage.push(commit.subject),
+				(commit) => firstPage.push(commit.oid),
 			);
 			expect(first.count).toBe(1);
 			expect(firstPage).toHaveLength(1);
 			// Fixtures hold at least two commits: the skipped page must deliver
-			// a *different* commit, proving the window actually moved.
+			// a *different* commit. OIDs, not subjects — subjects may repeat.
 			const secondPage: string[] = [];
 			const rest = await makePlatform().gitLog(
 				fixture.repoRoot,
 				{ skip: 1, limit: 5 },
-				(commit) => secondPage.push(commit.subject),
+				(commit) => secondPage.push(commit.oid),
 			);
 			expect(rest.count).toBeGreaterThanOrEqual(1);
 			expect(secondPage).toHaveLength(rest.count);
