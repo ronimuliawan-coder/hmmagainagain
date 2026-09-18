@@ -55,6 +55,10 @@ const rpc = BrowserView.defineRPC<PlatformRPCSchema>({
 				}
 				return platform.readRepo(root);
 			},
+			pickDirectory: () =>
+				platform
+					.pickDirectory()
+					.then((path) => ({ ok: true as const, path: path ?? undefined })),
 			watchStart: ({ root }) => {
 				const watchId = ++watchSeq;
 				void platform

@@ -268,6 +268,11 @@ function createRpcPlatform(): Platform {
 		readRepo: (root: string): Promise<RepoInfo> =>
 			rpc.request.readRepo({ root }),
 
+		pickDirectory: (): Promise<string | null> =>
+			rpc.request
+				.pickDirectory({})
+				.then((res) => (res.ok ? (res.path ?? null) : null)),
+
 		runGit: (
 			root: string,
 			args: string[],

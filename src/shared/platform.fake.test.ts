@@ -147,3 +147,10 @@ describe("fake platform Git simulation", () => {
 		});
 	});
 });
+
+describe("fake platform pickDirectory", () => {
+	test("always resolves null (no native dialog in a browser)", async () => {
+		const { platform } = buildFakeFixture();
+		await expect(platform.pickDirectory()).resolves.toBeNull();
+	});
+});

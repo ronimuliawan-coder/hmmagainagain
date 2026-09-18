@@ -103,3 +103,19 @@ describe("platform gitRemote failure forwarding", () => {
 		).rejects.toThrow();
 	});
 });
+
+describe("platform pickDirectory mapping", () => {
+	test("returns the first picked path", async () => {
+		const platform = createBunPlatform({
+			openFolder: () => Promise.resolve(["/home/user/repo", "/other"]),
+		});
+		await expect(platform.pickDirectory()).resolves.toBe("/home/user/repo");
+	});
+
+	test("empty selection (cancel) resolves null", async () => {
+		const platform = createBunPlatform({
+			openFolder: () => Promise.resolve([]),
+		});
+		await expect(platform.pickDirectory()).resolves.toBeNull();
+	});
+});

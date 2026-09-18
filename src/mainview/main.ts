@@ -17,6 +17,7 @@ import { buildStagedPatch } from "./patch-surgery";
 import {
 	getPlatform,
 	getPlatformLoadError,
+	isElectrobun,
 	sendSelfTestResult,
 } from "./platform";
 import { createStore } from "./store";
@@ -60,6 +61,7 @@ const statusList = byId<HTMLUListElement>("status-list");
 const repoInfo = byId<HTMLSpanElement>("repo-info");
 const repoInput = byId<HTMLInputElement>("repo-path");
 const openBtn = byId<HTMLButtonElement>("open-btn");
+const browseBtn = byId<HTMLButtonElement>("browse-btn");
 const themeBtn = byId<HTMLButtonElement>("theme-btn");
 const diffContainer = byId<HTMLDivElement>("diff-container");
 const diffInfo = byId<HTMLSpanElement>("diff-info");
@@ -377,6 +379,23 @@ openBtn.addEventListener("click", () => {
 			pushBtn.disabled = false;
 			pullBtn.disabled = false;
 			fetchBtn.disabled = false;
+		})
+		.catch((error) => {
+			repoInfo.textContent = `error: ${String(error)}`;
+		});
+});
+
+// Native folder picker (main-process Gtk dialog). Hidden in plain-browser
+// dev: the fake has no dialog and must never learn absolute paths.
+browseBtn.hidden = !isElectrobun();
+browseBtn.addEventListener("click", () => {
+	void getPlatform()
+		.pickDirectory()
+		.then((picked) => {
+			// Null = the user cancelled — leave the input alone, silently.
+			if (!picked) return;
+			repoInput.value = picked;
+			openBtn.click();
 		})
 		.catch((error) => {
 			repoInfo.textContent = `error: ${String(error)}`;
