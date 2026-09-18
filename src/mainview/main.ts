@@ -30,6 +30,7 @@ requestAnimationFrame(() => {
 });
 
 const RECENTS_KEY = "hmmagainagain.recents";
+const THEME_KEY = "hmmagainagain.theme";
 const REFRESH_DEBOUNCE_MS = 300;
 
 /** Fail-fast lookup: a missing id is a template/TS mismatch, not a runtime case. */
@@ -59,6 +60,7 @@ const statusList = byId<HTMLUListElement>("status-list");
 const repoInfo = byId<HTMLSpanElement>("repo-info");
 const repoInput = byId<HTMLInputElement>("repo-path");
 const openBtn = byId<HTMLButtonElement>("open-btn");
+const themeBtn = byId<HTMLButtonElement>("theme-btn");
 const diffContainer = byId<HTMLDivElement>("diff-container");
 const diffInfo = byId<HTMLSpanElement>("diff-info");
 const rangeButtons = [
@@ -486,6 +488,39 @@ commitBtn.addEventListener("click", () => {
 });
 
 renderRecents();
+
+// ---- Theme (PRD SHOULD: light/dark). CodeView follows the page
+// color-scheme via light-dark(), so one data-theme switch covers the
+// shell and the diff pane — no new dependency.
+function applyTheme(theme: "light" | "dark"): void {
+	document.documentElement.dataset.theme = theme;
+	themeBtn.textContent = theme === "dark" ? "Light" : "Dark";
+	themeBtn.setAttribute("aria-pressed", String(theme === "light"));
+	try {
+		localStorage.setItem(THEME_KEY, theme);
+	} catch {
+		// storage unavailable — theme is best-effort
+	}
+}
+
+{
+	let initial: "light" | "dark" = "dark";
+	try {
+		const stored = localStorage.getItem(THEME_KEY);
+		if (stored === "light" || stored === "dark") initial = stored;
+		else if (matchMedia("(prefers-color-scheme: light)").matches)
+			initial = "light";
+	} catch {
+		// storage unavailable — fall back to dark
+	}
+	applyTheme(initial);
+}
+
+themeBtn.addEventListener("click", () => {
+	applyTheme(
+		document.documentElement.dataset.theme === "light" ? "dark" : "light",
+	);
+});
 
 // ---- U7: push/pull/fetch ----
 let remoteOpRunning = false;

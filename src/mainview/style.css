@@ -2,12 +2,54 @@
 	box-sizing: border-box;
 }
 
+:root {
+	color-scheme: dark;
+	--bg: #14161a;
+	--panel: #1c1f24;
+	--inset: #101215;
+	--border: #2a2e34;
+	--fg: #e6e6e6;
+	--muted: #9aa4ae;
+	--accent: #61afef;
+	--danger: #e06c75;
+	--selected: #232830;
+	--st-m: #e5c07b;
+	--st-a: #98c379;
+	--st-d: #e06c75;
+	--st-rc: #61afef;
+	--st-u: #c678dd;
+	--st-untracked: #7a828e;
+	--st-ignored: #5c6370;
+}
+
+/* Light theme: CodeView follows color-scheme (light-dark()); the shell
+   follows these vars. Status hues are darkened for contrast on light. */
+[data-theme="light"] {
+	color-scheme: light;
+	--bg: #eef0f3;
+	--panel: #ffffff;
+	--inset: #f6f8fa;
+	--border: #d9dee5;
+	--fg: #1c1f24;
+	--muted: #5b6570;
+	--accent: #0969da;
+	--danger: #cf222e;
+	--selected: #e3ecf9;
+	--st-m: #9a6700;
+	--st-a: #1a7f37;
+	--st-d: #cf222e;
+	--st-rc: #0969da;
+	--st-u: #8250df;
+	--st-untracked: #6e7781;
+	--st-ignored: #8c959f;
+}
+
 body {
 	margin: 0;
 	padding: 0;
 	font-family: system-ui, sans-serif;
-	background: #14161a;
-	color: #e6e6e6;
+	background: var(--bg);
+	color: var(--fg);
 }
 
 /* Shared shell controls — one small dark base; panes override where needed. */
@@ -16,9 +58,9 @@ button {
 	padding: 4px 14px;
 	font-size: 0.8rem;
 	border-radius: 5px;
-	border: 1px solid #2a2e34;
-	background: #101215;
-	color: #e6e6e6;
+	border: 1px solid var(--border);
+	background: var(--inset);
+	color: var(--fg);
 	cursor: pointer;
 }
 
@@ -30,9 +72,9 @@ button:disabled {
 input,
 select,
 textarea {
-	background: #101215;
+	background: var(--inset);
 	color: inherit;
-	border: 1px solid #2a2e34;
+	border: 1px solid var(--border);
 	border-radius: 6px;
 	padding: 6px 8px;
 	font: inherit;
@@ -45,8 +87,8 @@ textarea {
 	gap: 8px;
 	align-items: center;
 	padding: 8px 12px;
-	background: #1c1f24;
-	border-bottom: 1px solid #2a2e34;
+	background: var(--panel);
+	border-bottom: 1px solid var(--border);
 }
 
 #topbar strong {
@@ -60,7 +102,7 @@ textarea {
 
 #repo-info {
 	font-size: 0.85rem;
-	color: #9aa4ae;
+	color: var(--muted);
 	white-space: nowrap;
 }
 
@@ -91,7 +133,7 @@ textarea {
 }
 
 #tree-pane {
-	border-right: 1px solid #2a2e34;
+	border-right: 1px solid var(--border);
 }
 
 /* ---- History pane (A3 windowing: the list is the scroll container and
@@ -125,7 +167,7 @@ textarea {
 }
 
 .history-row.selected {
-	background: #232830;
+	background: var(--selected);
 }
 
 .history-spacer {
@@ -139,7 +181,7 @@ textarea {
 }
 
 #commit-box {
-	border-top: 1px solid #2a2e34;
+	border-top: 1px solid var(--border);
 	padding-top: 8px;
 	display: flex;
 	flex-direction: column;
@@ -153,7 +195,7 @@ textarea {
 
 #write-error {
 	white-space: pre-line;
-	color: #e06c75;
+	color: var(--danger);
 	font-family: ui-monospace, monospace;
 	font-size: 0.72rem;
 	margin: 0;
@@ -169,23 +211,23 @@ textarea {
 
 #staged-count {
 	font-size: 0.78rem;
-	color: #9aa4ae;
+	color: var(--muted);
 }
 
 .status-action {
 	margin-left: auto;
 	font-size: 0.68rem;
 	padding: 1px 7px;
-	background: #101215;
-	color: #9aa4ae;
-	border: 1px solid #2a2e34;
+	background: var(--inset);
+	color: var(--muted);
+	border: 1px solid var(--border);
 	border-radius: 4px;
 	cursor: pointer;
 }
 
 .status-action:hover {
-	color: #e6e6e6;
-	border-color: #61afef;
+	color: var(--fg);
+	border-color: var(--accent);
 }
 
 #diff-toolbar button:disabled {
@@ -196,7 +238,7 @@ textarea {
 #diff-pane {
 	display: flex;
 	flex-direction: column;
-	border-left: 1px solid #2a2e34;
+	border-left: 1px solid var(--border);
 	padding: 0;
 }
 
@@ -205,20 +247,20 @@ textarea {
 	gap: 6px;
 	align-items: center;
 	padding: 6px 10px;
-	background: #1c1f24;
-	border-bottom: 1px solid #2a2e34;
+	background: var(--panel);
+	border-bottom: 1px solid var(--border);
 	font-size: 0.8rem;
 }
 
 #diff-toolbar button {
 	padding: 3px 10px;
 	font-size: 0.78rem;
-	color: #9aa4ae;
+	color: var(--muted);
 }
 
 #diff-toolbar button.active {
-	color: #e6e6e6;
-	border-color: #61afef;
+	color: var(--fg);
+	border-color: var(--accent);
 }
 
 #diff-toolbar input {
@@ -229,7 +271,7 @@ textarea {
 
 #diff-info {
 	margin-left: auto;
-	color: #9aa4ae;
+	color: var(--muted);
 	font-size: 0.78rem;
 	white-space: nowrap;
 }
@@ -238,7 +280,7 @@ textarea {
 	flex: 1;
 	min-height: 0;
 	overflow: auto;
-	background: #14161a;
+	background: var(--bg);
 }
 
 #tree-pane h2,
@@ -247,7 +289,7 @@ textarea {
 	font-size: 0.8rem;
 	text-transform: uppercase;
 	letter-spacing: 0.08em;
-	color: #9aa4ae;
+	color: var(--muted);
 	margin: 0 0 8px;
 }
 
@@ -267,7 +309,7 @@ textarea {
 	display: flex;
 	gap: 8px;
 	padding: 3px 0;
-	border-bottom: 1px solid #1c1f24;
+	border-bottom: 1px solid var(--border);
 }
 
 .status-letter {
@@ -278,24 +320,24 @@ textarea {
 }
 
 .status-m {
-	color: #e5c07b;
+	color: var(--st-m);
 }
 .status-a {
-	color: #98c379;
+	color: var(--st-a);
 }
 .status-d {
-	color: #e06c75;
+	color: var(--st-d);
 }
 .status-r,
 .status-c {
-	color: #61afef;
+	color: var(--st-rc);
 }
 .status-u {
-	color: #c678dd;
+	color: var(--st-u);
 }
 .status-untracked {
-	color: #7a828e;
+	color: var(--st-untracked);
 }
 .status-ignored {
-	color: #5c6370;
+	color: var(--st-ignored);
 }
