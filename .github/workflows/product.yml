@@ -64,9 +64,11 @@ jobs:
 
       - name: Install Hutch
         run: |
-          command -v hutch >/dev/null || curl -fsSL https://hutch.blackboard.sh/hutch/install.sh | sh
-          # The installer does not export PATH to later steps.
+          # PATH first: a cache-restored hutch must be found, or the
+          # installer refuses to claim the pre-existing ~/.hutch home.
           echo "$HOME/.hutch/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.hutch/bin:$PATH"
+          command -v hutch >/dev/null || curl -fsSL https://hutch.blackboard.sh/hutch/install.sh | sh
 
       - name: Prepare Electrobun devkit
         # Generates .hutch/devkit (tsconfig base + electrobun types) that
