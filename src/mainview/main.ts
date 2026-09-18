@@ -30,6 +30,7 @@ requestAnimationFrame(() => {
 });
 
 const RECENTS_KEY = "hmmagainagain.recents";
+const THEME_KEY = "hmmagainagain.theme";
 const REFRESH_DEBOUNCE_MS = 300;
 
 /** Fail-fast lookup: a missing id is a template/TS mismatch, not a runtime case. */
@@ -59,6 +60,7 @@ const statusList = byId<HTMLUListElement>("status-list");
 const repoInfo = byId<HTMLSpanElement>("repo-info");
 const repoInput = byId<HTMLInputElement>("repo-path");
 const openBtn = byId<HTMLButtonElement>("open-btn");
+const themeBtn = byId<HTMLButtonElement>("theme-btn");
 const diffContainer = byId<HTMLDivElement>("diff-container");
 const diffInfo = byId<HTMLSpanElement>("diff-info");
 const rangeButtons = [
@@ -76,7 +78,7 @@ const commitMessage = byId<HTMLTextAreaElement>("commit-message");
 const commitBtn = byId<HTMLButtonElement>("commit-btn");
 const stagedCount = byId<HTMLSpanElement>("staged-count");
 const writeError = byId<HTMLPreElement>("write-error");
-const historyList = byId<HTMLUListElement>("history-list");
+const historyList = byId<HTMLDivElement>("history-list");
 const branchSelect = byId<HTMLSelectElement>("branch-select");
 const branchName = byId<HTMLInputElement>("branch-name");
 const branchCreateBtn = byId<HTMLButtonElement>("branch-create-btn");
@@ -240,6 +242,10 @@ function render(state: AppState): void {
 			button.dataset.diffRange === state.diffMode,
 		);
 	}
+	// Keep the range inputs honest: history clicks set the range behind them.
+	if (document.activeElement !== diffFromInput)
+		diffFromInput.value = state.diffFrom;
+	if (document.activeElement !== diffToInput) diffToInput.value = state.diffTo;
 	unifiedBtn.classList.toggle("active", state.diffStyle === "unified");
 	splitBtn.classList.toggle("active", state.diffStyle === "split");
 }
@@ -487,6 +493,39 @@ commitBtn.addEventListener("click", () => {
 
 renderRecents();
 
+// ---- Theme (PRD SHOULD: light/dark). CodeView follows the page
+// color-scheme via light-dark(), so one data-theme switch covers the
+// shell and the diff pane — no new dependency.
+function applyTheme(theme: "light" | "dark"): void {
+	document.documentElement.dataset.theme = theme;
+	themeBtn.textContent = theme === "dark" ? "Light" : "Dark";
+	themeBtn.setAttribute("aria-pressed", String(theme === "light"));
+	try {
+		localStorage.setItem(THEME_KEY, theme);
+	} catch {
+		// storage unavailable — theme is best-effort
+	}
+}
+
+{
+	let initial: "light" | "dark" = "dark";
+	try {
+		const stored = localStorage.getItem(THEME_KEY);
+		if (stored === "light" || stored === "dark") initial = stored;
+		else if (matchMedia("(prefers-color-scheme: light)").matches)
+			initial = "light";
+	} catch {
+		// storage unavailable — fall back to dark
+	}
+	applyTheme(initial);
+}
+
+themeBtn.addEventListener("click", () => {
+	applyTheme(
+		document.documentElement.dataset.theme === "light" ? "dark" : "light",
+	);
+});
+
 // ---- U7: push/pull/fetch ----
 let remoteOpRunning = false;
 let remoteController: AbortController | null = null;
@@ -566,12 +605,16 @@ cancelBtn.addEventListener("click", () => remoteController?.abort());
 const HISTORY_PAGE = 50;
 let historyCommits: LogCommit[] = [];
 let selectedOid: string | null = null;
+// Ctrl-click compare anchor (PRD secondary flow: diff any two commits).
+let compareAnchor: string | null = null;
 let historyScrollQueued = false;
 
 function buildCommitRow(commit: LogCommit): HTMLElement {
-	const item = document.createElement("li");
+	const item = document.createElement("div");
 	item.className = "history-row";
 	item.dataset.oid = commit.oid;
+	item.setAttribute("role", "option");
+	item.setAttribute("aria-selected", "false");
 	const short = document.createElement("span");
 	short.className = "history-oid";
 	short.textContent = commit.shortOid;
@@ -582,7 +625,11 @@ function buildCommitRow(commit: LogCommit): HTMLElement {
 			? `${commit.subject} (${commit.refs})`
 			: commit.subject;
 	item.append(short, subject);
-	item.addEventListener("click", () => viewCommit(commit.oid));
+	item.addEventListener("click", (event) => {
+		if (event.ctrlKey || event.metaKey || event.shiftKey)
+			compareCommits(commit.oid);
+		else viewCommit(commit.oid);
+	});
 	return item;
 }
 
@@ -604,17 +651,20 @@ function renderHistoryWindow(): void {
 	);
 	historyList.innerHTML = "";
 	if (total === 0) return;
-	const top = document.createElement("li");
+	const top = document.createElement("div");
 	top.className = "history-spacer";
 	top.setAttribute("aria-hidden", "true");
 	top.style.height = `${win.topPad}px`;
 	historyList.append(top);
 	for (let i = win.start; i < win.end; i++) {
 		const row = buildCommitRow(historyCommits[i]);
-		if (historyCommits[i].oid === selectedOid) row.classList.add("selected");
+		const selected = historyCommits[i].oid === selectedOid;
+		if (selected) row.classList.add("selected");
+		row.setAttribute("aria-selected", String(selected));
+		if (historyCommits[i].oid === compareAnchor) row.classList.add("compare");
 		historyList.append(row);
 	}
-	const bottom = document.createElement("li");
+	const bottom = document.createElement("div");
 	bottom.className = "history-spacer";
 	bottom.setAttribute("aria-hidden", "true");
 	bottom.style.height = `${win.bottomPad}px`;
@@ -681,7 +731,7 @@ function refreshHistory(append = false): void {
 			olderBtn.hidden = true;
 			historyCommits = [];
 			renderHistoryWindow();
-			const item = document.createElement("li");
+			const item = document.createElement("div");
 			item.textContent = `error: ${String(error)}`;
 			historyList.append(item);
 		})
@@ -719,6 +769,7 @@ function refreshBranches(): void {
 
 /** Shows one commit's diff in the diff pane (commit vs its parent). */
 function viewCommit(oid: string): void {
+	compareAnchor = null;
 	store.set({
 		...store.get(),
 		diffMode: "range",
@@ -727,6 +778,39 @@ function viewCommit(oid: string): void {
 	});
 	void refreshDiff();
 	selectedOid = oid;
+	renderHistoryWindow();
+}
+
+/** Shows the diff between any two history commits (PRD secondary flow).
+ * Click order doesn't matter: the older commit is always `from`. */
+function compareCommits(oid: string): void {
+	if (!compareAnchor || compareAnchor === oid) {
+		compareAnchor = oid;
+		selectedOid = oid;
+		renderHistoryWindow();
+		return;
+	}
+	const anchorIdx = historyCommits.findIndex((c) => c.oid === compareAnchor);
+	const oidIdx = historyCommits.findIndex((c) => c.oid === oid);
+	if (anchorIdx === -1 || oidIdx === -1) {
+		// History reloaded under the anchor (branch switch, pull) — re-anchor.
+		compareAnchor = oidIdx === -1 ? null : oid;
+		selectedOid = compareAnchor;
+		renderHistoryWindow();
+		return;
+	}
+	// History is newest-first: the larger index is the older commit.
+	const [older, newer] =
+		anchorIdx > oidIdx ? [compareAnchor, oid] : [oid, compareAnchor as string];
+	compareAnchor = older;
+	selectedOid = newer;
+	store.set({
+		...store.get(),
+		diffMode: "range",
+		diffFrom: older,
+		diffTo: newer,
+	});
+	void refreshDiff();
 	renderHistoryWindow();
 }
 
@@ -780,6 +864,34 @@ branchCreateBtn.addEventListener("click", () => {
 olderBtn.addEventListener("click", () => refreshHistory(true));
 historyList.addEventListener("scroll", queueHistoryWindowRender, {
 	passive: true,
+});
+
+// Keyboard-first history (PRD SHOULD): arrows walk commits, Enter's
+// implicit — every step views, like a click.
+historyList.addEventListener("keydown", (event) => {
+	if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+	event.preventDefault();
+	if (historyCommits.length === 0) return;
+	const current = historyCommits.findIndex((c) => c.oid === selectedOid);
+	const next =
+		current === -1
+			? 0
+			: Math.min(
+					historyCommits.length - 1,
+					Math.max(0, current + (event.key === "ArrowDown" ? 1 : -1)),
+				);
+	viewCommit(historyCommits[next].oid);
+	historyList
+		.querySelector(".history-row.selected")
+		?.scrollIntoView({ block: "nearest" });
+});
+
+// Enter submits the two text-box actions (repo open, branch create).
+repoInput.addEventListener("keydown", (event) => {
+	if (event.key === "Enter") openBtn.click();
+});
+branchName.addEventListener("keydown", (event) => {
+	if (event.key === "Enter") branchCreateBtn.click();
 });
 
 /** Samples requestAnimationFrame gaps while stepping the diff scroll — a
