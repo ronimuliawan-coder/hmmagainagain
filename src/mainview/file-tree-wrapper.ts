@@ -8,6 +8,8 @@ import { FileTree } from "@pierre/trees";
 export interface TreeHandle {
 	setPaths(paths: readonly string[]): void;
 	setGitStatus(entries: readonly GitStatusEntry[]): void;
+	/** Filters visible rows through the built-in search session. */
+	setSearch(words: string | null): void;
 	/** Applies themeToTreeStyles output to the host container. The trees
 	 * stylesheet reads --trees-theme-* through its fallback chain, and CSS
 	 * custom properties inherit into the shadow tree — no FileTree API
@@ -22,10 +24,14 @@ export function mountFileTree(container: HTMLElement): TreeHandle {
 	const tree = new FileTree({
 		paths: [],
 		initialExpansion: "open",
+		// Workbench density + filterable (diffshub parity: compact rows).
+		density: "compact",
+		search: true,
 	});
 	tree.render({ containerWrapper: container });
 	return {
 		setPaths: (paths) => tree.resetPaths(paths),
+		setSearch: (words) => tree.setSearch(words),
 		setGitStatus: (entries) => tree.setGitStatus(entries),
 		setTheme: (styles) => {
 			for (const [key, value] of Object.entries(styles)) {
