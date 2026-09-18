@@ -7,6 +7,7 @@ import type {
 	LogCommit,
 	RepoInfo,
 } from "../shared/platform";
+import { deriveChromeTokens } from "./chrome-tokens";
 import {
 	type DiffStyle,
 	type DiffViewHandle,
@@ -368,7 +369,7 @@ async function openRepo(root: string): Promise<string> {
 	]);
 	if (!tree) tree = mountFileTree(treeContainer);
 	tree.setPaths(paths);
-	applyTreeTheme();
+	applyPierreTheme();
 	if (!diffView)
 		diffView = mountDiffView(
 			diffContainer,
@@ -558,13 +559,20 @@ function persistTheme(): void {
 	}
 }
 
-/** Applies the resolved Pierre theme to the file tree; failures keep the
- * tree's defaults (theme must never break repo browsing). */
-function applyTreeTheme(): void {
-	if (!tree) return;
+/** Applies the resolved Pierre theme to the shell chrome and the file
+ * tree; failures keep the stylesheet hand values (theme must never break
+ * repo browsing). One resolution serves both consumers. */
+function applyPierreTheme(): void {
 	const name = pierreThemeName(shellTheme.scheme, shellTheme.variant);
 	void resolveTheme(name)
-		.then((resolved) => tree?.setTheme(themeToTreeStyles(resolved)))
+		.then((resolved) => {
+			for (const [key, value] of Object.entries(
+				deriveChromeTokens(resolved, shellTheme.scheme),
+			)) {
+				document.documentElement.style.setProperty(key, value);
+			}
+			tree?.setTheme(themeToTreeStyles(resolved));
+		})
 		.catch(() => {});
 }
 
@@ -588,7 +596,7 @@ function applyTheme(next: ShellTheme): void {
 		if (lastPatch) diffView.setPatch(lastPatch);
 		diffView.setDiffStyle(style);
 	}
-	applyTreeTheme();
+	applyPierreTheme();
 }
 
 {
