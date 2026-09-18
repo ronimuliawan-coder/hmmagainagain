@@ -5,6 +5,8 @@
 #
 # Runner choice is raw Namespace labels (no dashboard profile dependency):
 # 8 vCPU / 16 GB shape with an attached cache volume (bun + apt modes).
+# Ubuntu 24.04 (not 22.04): Hutch's Cottontail 0.6.0 needs GLIBC_2.36+,
+# which 22.04 (glibc 2.35) cannot provide — proven by a failed run.
 # Dashboard-side upgrades that need no workflow change: a named profile
 # (namespace-profile-*), cached git checkouts, bigger shapes.
 # Ubuntu-only: Windows/macOS distribution is post-v1, so a wider matrix
@@ -29,7 +31,7 @@ jobs:
   gate-and-build:
     name: gate + Linux stable build
     runs-on:
-      - nscloud-ubuntu-22.04-amd64-8x16-with-cache
+      - nscloud-ubuntu-24.04-amd64-8x16-with-cache
       - nscloud-cache-size-20gb
       - nscloud-cache-tag-hmmagainagain-product
     permissions:
