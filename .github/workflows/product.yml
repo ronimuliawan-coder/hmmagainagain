@@ -3,12 +3,10 @@
 # one checkout, one install) with a warm cache volume — faster than split
 # jobs on ephemeral runners.
 #
-# Runner choice is raw Namespace labels (no dashboard profile dependency):
-# 8 vCPU / 16 GB shape with an attached cache volume (bun + apt modes).
-# Ubuntu 24.04 (not 22.04): Hutch's Cottontail 0.6.0 needs GLIBC_2.36+,
-# which 22.04 (glibc 2.35) cannot provide — proven by a failed run.
-# Dashboard-side upgrades that need no workflow change: a named profile
-# (namespace-profile-*), cached git checkouts, bigger shapes.
+# Runner choice is raw Namespace labels (no dashboard profile dependency).
+# Shape 4x8: this workload (tsc/biome/tests/vite/zstd) is single-threaded
+# bound — 8x16 doubles cost for no measurable gain. Cache volume carries
+# bun/apt/toolchain/hutch caches; git mirrors skip the full clone.
 # Ubuntu-only: Windows/macOS distribution is post-v1, so a wider matrix
 # would be decorative, not coverage. No secrets.
 
@@ -31,14 +29,18 @@ jobs:
   gate-and-build:
     name: gate + Linux stable build
     runs-on:
-      - nscloud-ubuntu-24.04-amd64-8x16-with-cache
+      - nscloud-ubuntu-24.04-amd64-4x8-with-cache
       - nscloud-cache-size-20gb
       - nscloud-cache-tag-hmmagainagain-product
+      - nscloud-cache-allow-commit-from-dev
+      - nscloud-cache-allow-commit-from-master
+      - nscloud-git-mirror-5gb
+      - nscloud-runner-tool-cache-20gb
     permissions:
       contents: read
     steps:
-      - name: Check out
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Check out (cached mirror)
+        uses: namespacelabs/nscloud-checkout-action@def520b6c21233362f09c9ceda4352c51cceca26 # v8
         with:
           persist-credentials: false
 
@@ -47,21 +49,28 @@ jobs:
         with:
           bun-version: "1.4.0"
 
-      - name: Set up Namespace caches (bun + apt)
-        uses: namespacelabs/nscloud-cache-action@v1
+      - name: Set up Namespace caches (bun + apt + hutch toolchains)
+        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1
         with:
           cache: |
             bun
             apt
+          # Whole ~/.hutch home (not subpaths): the install marker lives at
+          # its root, and mounting only subdirs leaves an unmarked home the
+          # installer refuses to claim. Version upgrades need a cache bust.
+          path: |
+            ~/.hutch
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
       - name: Install Hutch
         run: |
-          curl -fsSL https://hutch.blackboard.sh/hutch/install.sh | sh
-          # The installer does not export PATH to later steps.
+          # PATH first: a cache-restored hutch must be found, or the
+          # installer refuses to claim the pre-existing ~/.hutch home.
           echo "$HOME/.hutch/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.hutch/bin:$PATH"
+          command -v hutch >/dev/null || curl -fsSL https://hutch.blackboard.sh/hutch/install.sh | sh
 
       - name: Prepare Electrobun devkit
         # Generates .hutch/devkit (tsconfig base + electrobun types) that
@@ -72,7 +81,11 @@ jobs:
         run: bun run check
 
       - name: Install system webview headers
-        run: sudo apt-get update -qq && sudo apt-get install -qy libwebkit2gtk-4.1-dev
+        run: |
+          dpkg -s libwebkit2gtk-4.1-dev >/dev/null 2>&1 || {
+            sudo apt-get update -qq
+            sudo apt-get install -qy libwebkit2gtk-4.1-dev
+          }
 
       - name: Stable build
         run: hutch run build
