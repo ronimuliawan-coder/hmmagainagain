@@ -34,6 +34,7 @@ describe("windowRows", () => {
 		const w = windowRows(1000, 1_000_000, 28, 400);
 		expect(w.end).toBe(1000);
 		expect(w.bottomPad).toBe(0);
+		expect(w.start).toBeLessThanOrEqual(w.end);
 	});
 
 	test("non-positive row height falls back", () => {

@@ -11,9 +11,9 @@ import { join } from "node:path";
 import type { Platform } from "./platform";
 
 export interface ConformanceFixture {
-	/** A valid git worktree with at least one commit containing `trackedFile`. */
-	repoRoot: string;
-	/** A directory that is NOT a git repository. */
+	/** A valid git worktree containing `trackedFile`, with at least two
+	 * commits (paging tests skip the first). */
+	repoRoot: string /** A directory that is NOT a git repository. */;
 	nonRepoRoot: string;
 	trackedFile: string;
 	trackedContent: string;
@@ -120,21 +120,25 @@ export function runConformance(
 		});
 
 		test("gitLog honors limit and skip", async () => {
-			const seen: string[] = [];
+			const firstPage: string[] = [];
 			const first = await makePlatform().gitLog(
 				fixture.repoRoot,
 				{ limit: 1 },
-				(commit) => seen.push(commit.oid),
+				(commit) => firstPage.push(commit.subject),
 			);
 			expect(first.count).toBe(1);
-			expect(seen).toHaveLength(1);
+			expect(firstPage).toHaveLength(1);
+			// Fixtures hold at least two commits: the skipped page must deliver
+			// a *different* commit, proving the window actually moved.
+			const secondPage: string[] = [];
 			const rest = await makePlatform().gitLog(
 				fixture.repoRoot,
 				{ skip: 1, limit: 5 },
-				() => {},
+				(commit) => secondPage.push(commit.subject),
 			);
-			// Both fixtures hold exactly two commits (bun builder adds one).
-			expect(rest.count).toBe(1);
+			expect(rest.count).toBeGreaterThanOrEqual(1);
+			expect(secondPage).toHaveLength(rest.count);
+			expect(secondPage[0]).not.toBe(firstPage[0]);
 		});
 
 		test("gitRemote fetch resolves against the fixture remote", async () => {

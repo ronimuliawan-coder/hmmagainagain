@@ -27,7 +27,12 @@ export function windowRows(
 	if (total <= 0) return { start: 0, end: 0, topPad: 0, bottomPad: 0 };
 	const rh = rowHeight > 0 ? rowHeight : FALLBACK_ROW_HEIGHT;
 	const vh = Math.max(0, viewportHeight);
-	const start = Math.max(0, Math.floor(scrollTop / rh) - overscan);
+	// Clamp the effective scroll: beyond content height the range would
+	// invert (start > end). Browsers clamp scrollTop themselves, but the
+	// pure function must hold for any input (CodeRabbit round 2).
+	const maxScroll = Math.max(0, total * rh - vh);
+	const clamped = Math.min(Math.max(0, scrollTop), maxScroll);
+	const start = Math.max(0, Math.floor(clamped / rh) - overscan);
 	const visible = Math.ceil(vh / rh) + overscan * 2;
 	const end = Math.min(total, start + visible);
 	return { start, end, topPad: start * rh, bottomPad: (total - end) * rh };

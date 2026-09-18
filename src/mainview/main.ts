@@ -355,7 +355,6 @@ async function openRepo(root: string): Promise<string> {
 	store.set({ ...store.get(), root, info, status });
 	void refreshDiff();
 	refreshBranches();
-	historyCommits = [];
 	refreshHistory();
 	return `${info.branch} · ${info.head.slice(0, 7)} · ${status.entries.length} change(s)`;
 }
@@ -480,7 +479,6 @@ commitBtn.addEventListener("click", () => {
 			writeError.textContent = "";
 			// A commit moves HEAD: every diff range can change.
 			refreshBranches();
-			historyCommits = [];
 			refreshHistory();
 			return refreshStatus().then(() => refreshDiff());
 		})
@@ -558,9 +556,13 @@ fetchBtn.addEventListener("click", () => void runRemote("fetch"));
 cancelBtn.addEventListener("click", () => remoteController?.abort());
 
 // ---- U6 history pane + A3 windowing ----
-// The commit array grows unboundedly (cheap objects); only a bounded row
-// window lives in the DOM (post-v1 Unit A3). All renders go through
-// renderHistoryWindow so selection and spacers stay consistent.
+// The commit array grows unboundedly (cheap objects) while only a bounded
+// row window lives in the DOM (post-v1 Unit A3). Deliberate, documented
+// limit: ~200–400 B per commit means even 100k histories stay ≈20–40 MB —
+// unreachable for personal repos, while the DOM jank vector (the actual
+// budget) is capped. A page-cache redesign waits for a real need.
+// All renders go through renderHistoryWindow so selection and spacers stay
+// consistent.
 const HISTORY_PAGE = 50;
 let historyCommits: LogCommit[] = [];
 let selectedOid: string | null = null;
@@ -633,6 +635,11 @@ let historyLoading = false;
 // A full refresh requested while a page load is in flight (e.g. from the
 // pull path) is re-run on settle instead of dropped (CodeRabbit follow-up).
 let historyRefreshQueued = false;
+// Generation guard (CodeRabbit round 2): reset points below used to replace
+// the array while an earlier gitLog stream was still pushing into it —
+// cross-contaminating repositories/branches. Every load takes a generation;
+// stale callbacks no-op.
+let historyGen = 0;
 function refreshHistory(append = false): void {
 	const { root } = store.get();
 	if (!root) return;
@@ -642,6 +649,7 @@ function refreshHistory(append = false): void {
 	}
 	historyLoading = true;
 	olderBtn.disabled = true;
+	const gen = ++historyGen;
 	if (!append) {
 		historyCommits = [];
 		renderHistoryWindow();
@@ -651,14 +659,16 @@ function refreshHistory(append = false): void {
 			root,
 			{ limit: HISTORY_PAGE, skip: append ? historyCommits.length : 0 },
 			(commit) => {
-				historyCommits.push(commit);
+				if (gen === historyGen) historyCommits.push(commit);
 			},
 		)
 		.then(({ count }) => {
+			if (gen !== historyGen) return;
 			olderBtn.hidden = count < HISTORY_PAGE;
 			renderHistoryWindow();
 		})
 		.catch((error) => {
+			if (gen !== historyGen) return;
 			olderBtn.hidden = true;
 			historyCommits = [];
 			renderHistoryWindow();
@@ -726,7 +736,6 @@ function afterWorktreeChange(): Promise<void> {
 		})
 		.then(() => {
 			refreshBranches();
-			historyCommits = [];
 			refreshHistory();
 			return refreshDiff();
 		});
