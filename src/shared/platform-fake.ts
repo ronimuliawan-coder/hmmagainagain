@@ -107,6 +107,11 @@ export function buildFakeFixture() {
 
 	const platform: Platform = {
 		kind: "fake",
+		pickDirectory: () => {
+			// A plain browser has no native folder dialog (and must never
+			// learn absolute paths) — the UI hides Browse outside Electrobun.
+			return Promise.resolve(null);
+		},
 		readRepo: (root) => {
 			if (root !== FAKE_REPO) {
 				return Promise.reject(new Error(`not a git repository: ${root}`));

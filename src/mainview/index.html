@@ -11,7 +11,15 @@
         <input id="repo-path" placeholder="/path/to/repository" list="recent-list" aria-label="Repository path" />
         <datalist id="recent-list"></datalist>
       <button id="open-btn" type="button">Open</button>
+      <button id="browse-btn" type="button" title="Pick a repository folder">Browse…</button>
       <button id="theme-btn" type="button" aria-pressed="false" title="Toggle light/dark theme">Light</button>
+      <select id="theme-variant" aria-label="Theme variant">
+        <option value="default">Default</option>
+        <option value="soft">Soft</option>
+        <option value="vibrant">Vibrant</option>
+        <option value="protanopia-deuteranopia">Colorblind-safe (red-green)</option>
+        <option value="tritanopia">Colorblind-safe (blue-yellow)</option>
+      </select>
       <span id="repo-info">no repository open</span>
     </header>
     <main id="shell">

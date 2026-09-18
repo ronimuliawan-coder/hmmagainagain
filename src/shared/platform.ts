@@ -51,14 +51,19 @@ export interface GitDiffOptions {
 
 /**
  * The UI never touches Node/Bun/Electron APIs directly — only this interface.
- * `openRepo` is intentionally absent: Electrobun 2.0.1 ships no native
- * open-directory dialog (devkit audit, RON-294). Until one exists upstream or a
- * custom picker lands (U3), the webview supplies a path to `readRepo`.
+ * `openRepo` is intentionally absent: Electrobun 2.0.1 ships no webview-side
+ * open-directory dialog (devkit audit, RON-294). Folder picking crosses as
+ * `pickDirectory` instead (native GtkFileChooserNative folder mode via the
+ * main-process Utils, RON-324); the webview still supplies the path to
+ * `readRepo`, which validates it.
  */
 export interface Platform {
 	readonly kind: "fake" | "bun" | "rpc";
 	/** Validates the path is a git worktree; rejects (throws) otherwise. */
 	readRepo(root: string): Promise<RepoInfo>;
+	/** Native folder picker; resolves null when the user cancels. The fake
+	 * (plain-browser dev) has no native dialog and always resolves null. */
+	pickDirectory(): Promise<string | null>;
 	/**
 	 * Runs git in the repo. args must NOT include the git binary name.
 	 * Implementations enforce argv-array spawning (no shell), cwd = root.
@@ -142,6 +147,12 @@ export type PlatformRPCSchema = {
 	bun: RPCSchema<{
 		requests: {
 			readRepo: { params: { root: string }; response: RepoInfo };
+			/** Native folder picker (RON-324). Single-response: omission
+			 * means the user cancelled. Throws on dialog failure. */
+			pickDirectory: {
+				params: Record<string, never>;
+				response: { ok: boolean; path?: string };
+			};
 			watchStart: { params: { root: string }; response: { watchId: number } };
 			watchStop: { params: { watchId: number }; response: { ok: boolean } };
 			runGitStart: { params: RpcRunStartParams; response: { runId: number } };

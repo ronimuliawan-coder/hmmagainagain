@@ -21,6 +21,8 @@ const harness = {
 	startGate: null as Promise<void> | null,
 	/** When true, the next start request rejects (start-failure tests). */
 	failNextStart: false,
+	/** Next pickDirectory response (path string, null = cancel). */
+	pickResult: "/picked/repo" as string | null,
 };
 
 // Function object: `new`-able for `new Electrobun.Electroview(...)` in
@@ -50,6 +52,10 @@ const FakeElectroview = Object.assign(
 					gitDiffAbort: async (params: { diffId: number }) => {
 						harness.diffAbortCalls.push(params.diffId);
 						return { ok: true };
+					},
+					pickDirectory: async () => {
+						const path = harness.pickResult;
+						return path === null ? { ok: true } : { ok: true, path };
 					},
 				},
 				send: {},
@@ -269,5 +275,22 @@ describe("rpc platform gitRemote settling (U7a)", () => {
 			patch: "",
 		});
 		await flush();
+	});
+});
+
+describe("rpc platform pickDirectory (RON-324)", () => {
+	test("passes the picked path through", async () => {
+		harness.pickResult = "/picked/repo";
+		await expect(
+			withHangGuard(getPlatform().pickDirectory(), "pickDirectory"),
+		).resolves.toBe("/picked/repo");
+	});
+
+	test("cancel (omitted path) resolves null", async () => {
+		harness.pickResult = null;
+		await expect(
+			withHangGuard(getPlatform().pickDirectory(), "pickDirectory"),
+		).resolves.toBeNull();
+		harness.pickResult = "/picked/repo";
 	});
 });

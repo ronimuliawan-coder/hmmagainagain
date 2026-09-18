@@ -17,6 +17,18 @@ import { spawnGit } from "./git-spawn";
 const WATCH_DEBOUNCE_MS = 100;
 const git = createGitAdapter();
 
+/** Native folder picker (GtkFileChooserNative folder mode on Linux).
+ * Dynamically imported so plain-bun unit tests never load the Electrobun
+ * main-process SDK; only the real main process calls this path. */
+async function openNativeFolder(): Promise<string[]> {
+	const { Utils } = await import("electrobun/main");
+	return Utils.openFileDialog({
+		canChooseFiles: false,
+		canChooseDirectory: true,
+		allowsMultipleSelection: false,
+	});
+}
+
 async function gitOut(
 	root: string,
 	args: string[],
@@ -29,7 +41,10 @@ async function gitOut(
 	return { code: result.code ?? 1, out };
 }
 
-export function createBunPlatform(): Platform {
+export function createBunPlatform(deps?: {
+	/** Injected folder picker (tests); defaults to the native dialog. */
+	openFolder?: () => Promise<string[]>;
+}): Platform {
 	const platform: Platform = {
 		kind: "bun",
 		async readRepo(root: string): Promise<RepoInfo> {
@@ -105,6 +120,13 @@ export function createBunPlatform(): Platform {
 
 		commit(root: string, message: string) {
 			return git.commit(root, message);
+		},
+
+		async pickDirectory(): Promise<string | null> {
+			const open = deps?.openFolder ?? openNativeFolder;
+			const paths = await open();
+			// Empty = the user cancelled (decodeDialogPaths: [] on cancel).
+			return paths[0] ?? null;
 		},
 
 		watchRepo(root: string, onEvents: (batch: FsEventBatch) => void) {
