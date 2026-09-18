@@ -1,0 +1,82 @@
+# Product CI on Namespace runners (RON-316): the full local gate plus a
+# Linux stable build, on every push and pull request. Single job (one queue,
+# one checkout, one install) with a warm cache volume — faster than split
+# jobs on ephemeral runners.
+#
+# Runner choice is raw Namespace labels (no dashboard profile dependency):
+# 8 vCPU / 16 GB shape with an attached cache volume (bun + apt modes).
+# Dashboard-side upgrades that need no workflow change: a named profile
+# (namespace-profile-*), cached git checkouts, bigger shapes.
+# Ubuntu-only: Windows/macOS distribution is post-v1, so a wider matrix
+# would be decorative, not coverage. No secrets.
+
+name: product
+
+on:
+  push:
+    branches: [dev, master, "feat/**", "fix/**", "docs/**", "chore/**"]
+  pull_request:
+
+# A newer push supersedes the run in flight — except the dev↔master sync,
+# which owns its own never-cancel concurrency (see sync-dev-to-master.yml).
+concurrency:
+  group: product-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  gate-and-build:
+    name: gate + Linux stable build
+    runs-on:
+      - nscloud-ubuntu-22.04-amd64-8x16-with-cache
+      - nscloud-cache-size-20gb
+      - nscloud-cache-tag-hmmagainagain-product
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Bun 1.4.0
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.0"
+
+      - name: Set up Namespace caches (bun + apt)
+        uses: namespacelabs/nscloud-cache-action@v1
+        with:
+          cache: |
+            bun
+            apt
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install Hutch
+        run: |
+          curl -fsSL https://hutch.blackboard.sh/hutch/install.sh | sh
+          # The installer does not export PATH to later steps.
+          echo "$HOME/.hutch/bin" >> "$GITHUB_PATH"
+
+      - name: Prepare Electrobun devkit
+        # Generates .hutch/devkit (tsconfig base + electrobun types) that
+        # tsconfig.json extends and tsc requires. Gitignored by design.
+        run: hutch electrobun prepare
+
+      - name: Gate (tsc + biome + bun test)
+        run: bun run check
+
+      - name: Install system webview headers
+        run: sudo apt-get update -qq && sudo apt-get install -qy libwebkit2gtk-4.1-dev
+
+      - name: Stable build
+        run: hutch run build
+
+      - name: Report payload
+        run: |
+          payload="$(ls build/stable-linux-x64/hmmagainagain/Resources/*.tar.zst | head -1)"
+          bytes="$(stat -c %s "$payload")"
+          echo "payload=$payload bytes=$bytes ($(awk "BEGIN {printf \"%.1f\", $bytes/1024/1024}") MiB)"

@@ -48,6 +48,11 @@ beforeAll(async () => {
 	mkdirSync(plain, { recursive: true });
 	writeFileSync(join(repo, "hello.txt"), "hello v1\n");
 	await git("init", "-q", "-b", "main");
+	// Local identity: adapter calls (commit/staging) carry no env, so the
+	// fixture must resolve identity from its own config — as machines
+	// without global git identity (CI) proved (CodeRabbit/CI round).
+	await git("config", "user.email", "fixture@example.test");
+	await git("config", "user.name", "fixture");
 	await git("add", ".");
 	await git("commit", "-q", "-m", "base");
 });

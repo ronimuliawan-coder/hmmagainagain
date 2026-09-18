@@ -102,7 +102,7 @@ export async function createBranch(
 	if (options.startPoint !== undefined) {
 		assertSafeRef(options.startPoint, "start point");
 	}
-	await enqueueWrite(async () => {
+	await enqueueWrite(root, async () => {
 		if (options.switchTo) {
 			await assertCleanWorktree(root);
 			const startPoint = options.startPoint ? [options.startPoint] : [];
@@ -116,7 +116,7 @@ export async function createBranch(
 
 export async function switchBranch(root: string, name: string): Promise<void> {
 	assertSafeRef(name, "branch name");
-	await enqueueWrite(async () => {
+	await enqueueWrite(root, async () => {
 		await assertCleanWorktree(root);
 		await runWrite(root, ["switch", name]);
 	});

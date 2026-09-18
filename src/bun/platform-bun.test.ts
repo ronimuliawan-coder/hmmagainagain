@@ -1,7 +1,7 @@
 // Conformance tests for the real Bun platform against a real temporary
 // git worktree (created and torn down per test run).
 
-import { afterAll } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -42,12 +42,28 @@ async function buildFixture(): Promise<ConformanceFixture> {
 			throw new Error(`fixture git ${args[0]} failed: ${result.stderr}`);
 		}
 	}
+	// Second commit (conformance paging needs two) + a local bare origin
+	// (conformance fetch must resolve without network). Additive only:
+	// no existing assertion reads refs beyond HEAD:trackedFile.
+	writeFileSync(join(repoRoot, "second.txt"), "second\n");
+	for (const args of [
+		["add", "."],
+		["commit", "-q", "-m", "second"],
+		["init", "-q", "--bare", join(base, "origin.git")],
+		["remote", "add", "origin", join(base, "origin.git")],
+	]) {
+		const result = await spawnGit(repoRoot, args);
+		if (result.code !== 0) {
+			throw new Error(`fixture git ${args[0]} failed: ${result.stderr}`);
+		}
+	}
 
 	return {
 		repoRoot,
 		nonRepoRoot,
 		trackedFile: "hello.txt",
 		trackedContent: TRACKED_CONTENT,
+		remoteName: "origin",
 		longRunArgs: ["show", "HEAD:big.txt"],
 		longRunMarker: MARKER,
 		makeNestedChange: () => {
@@ -67,3 +83,23 @@ afterAll(() => {
 });
 
 runConformance(() => createBunPlatform(), fixture);
+
+describe("platform gitRemote failure forwarding", () => {
+	test("unknown remote rejects instead of resolving ok:true", async () => {
+		const platform = createBunPlatform();
+		// Backs the MR !1 rebuttal in code: Bun-side failures must reject
+		// so the RPC layer can forward them verbatim.
+		await expect(
+			platform.gitRemote(fixture.repoRoot, "fetch", {
+				remote: "no-such-remote",
+			}),
+		).rejects.toThrow();
+	});
+
+	test("non-repository rejects", async () => {
+		const platform = createBunPlatform();
+		await expect(
+			platform.gitRemote(fixture.nonRepoRoot, "fetch", { remote: "origin" }),
+		).rejects.toThrow();
+	});
+});

@@ -20,6 +20,8 @@ const platform = createBunPlatform();
 const git = createGitAdapter();
 let logSeq = 0;
 const logRuns = new Map<number, AbortController>();
+let diffSeq = 0;
+const diffRuns = new Map<number, AbortController>();
 let remoteOpSeq = 0;
 const remoteOps = new Map<number, AbortController>();
 
@@ -135,28 +137,39 @@ const rpc = BrowserView.defineRPC<PlatformRPCSchema>({
 					return Promise.resolve({ ok: false as const, error: String(error) });
 				}
 			},
-			gitDiff: ({ root, from, to, staged }) => {
-				try {
-					// Adapter throws GitError on failure; bridge it into ok/error.
-					const startedAt = Date.now();
-					return git
-						.diff(root, { from, to, staged })
-						.then((result) => {
-							if (process.env.SMOKE === "1") {
-								// Budget evidence: adapter-side diff+transfer cost.
-								console.log(
-									`[SMOKE] gitDiff adapter ${Date.now() - startedAt}ms files=${result.files.length} bytes=${result.patch.length}`,
-								);
-							}
-							return { ok: true as const, result };
-						})
-						.catch((error: unknown) => ({
-							ok: false as const,
-							error: String(error),
-						}));
-				} catch (error) {
-					return Promise.resolve({ ok: false as const, error: String(error) });
-				}
+			gitDiffStart: ({ root, from, to, staged }) => {
+				// A2: per-request controller so superseded diffs die instead
+				// of racing (mirrors gitRemoteStart; map cleaned on settle).
+				const diffId = ++diffSeq;
+				const controller = new AbortController();
+				diffRuns.set(diffId, controller);
+				const startedAt = Date.now();
+				void git
+					.diff(root, { from, to, staged, signal: controller.signal })
+					.then((result) => {
+						if (process.env.SMOKE === "1") {
+							// Budget evidence: adapter-side diff+transfer cost.
+							console.log(
+								`[SMOKE] gitDiff adapter ${Date.now() - startedAt}ms files=${result.files.length} bytes=${result.patch.length}`,
+							);
+						}
+						send("gitDiffDone", { diffId, ok: true, result, stderr: "" });
+					})
+					.catch((error: unknown) =>
+						send("gitDiffDone", {
+							diffId,
+							ok: false,
+							stderr: String(error),
+						}),
+					)
+					.finally(() => {
+						diffRuns.delete(diffId);
+					});
+				return { diffId };
+			},
+			gitDiffAbort: ({ diffId }) => {
+				diffRuns.get(diffId)?.abort();
+				return { ok: true };
 			},
 			gitLogStart: ({ root, limit, skip, range }) => {
 				const logId = ++logSeq;

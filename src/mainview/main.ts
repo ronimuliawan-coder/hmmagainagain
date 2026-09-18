@@ -12,6 +12,7 @@ import {
 } from "./diff-view-wrapper";
 import { mountFileTree, type TreeHandle } from "./file-tree-wrapper";
 import { statusToTreeEntries } from "./git-status-mapping";
+import { FALLBACK_ROW_HEIGHT, windowRows } from "./history-window";
 import { buildStagedPatch } from "./patch-surgery";
 import {
 	getPlatform,
@@ -115,6 +116,7 @@ let watcher: { stop: () => Promise<void> } | null = null;
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 // Guards against applying a stale diff response after a rapid range switch.
 let diffSeq = 0;
+let diffController: AbortController | null = null;
 // Stage timings of the last diff load — read by the SMOKE self-test.
 const diffTimings = { fetchMs: 0, parseMs: 0, files: 0 };
 // The patch behind the current diff view + the user's line selection in it —
@@ -285,12 +287,18 @@ async function refreshDiff(): Promise<void> {
 	if (!state.root) return;
 	if (!diffView) diffView = mountDiffView(diffContainer, handleDiffSelection);
 	const seq = ++diffSeq;
+	// A2: superseded diffs die instead of racing. The previous request is
+	// aborted before the new one starts; the seq guard below stays as the
+	// final stale-result backstop.
+	diffController?.abort();
+	const controller = new AbortController();
+	diffController = controller;
 	try {
 		const t0 = performance.now();
-		const result = await getPlatform().gitDiff(
-			state.root,
-			diffOptionsFor(state),
-		);
+		const result = await getPlatform().gitDiff(state.root, {
+			...diffOptionsFor(state),
+			signal: controller.signal,
+		});
 		const fetchMs = performance.now() - t0;
 		if (seq !== diffSeq) return; // a newer request superseded this one
 		const t1 = performance.now();
@@ -304,6 +312,8 @@ async function refreshDiff(): Promise<void> {
 		diffTimings.files = result.files.length;
 		diffInfo.textContent = `${result.files.length} file(s)`;
 	} catch (error) {
+		// A superseded request's abort is silence, not an error to display.
+		if (controller.signal.aborted) return;
 		// Surface bad ranges (e.g. unknown ref) in the pane, not as a rejection.
 		if (seq === diffSeq) {
 			diffTimings.files = 0;
@@ -345,8 +355,6 @@ async function openRepo(root: string): Promise<string> {
 	store.set({ ...store.get(), root, info, status });
 	void refreshDiff();
 	refreshBranches();
-	historyList.innerHTML = "";
-	historyLoaded = 0;
 	refreshHistory();
 	return `${info.branch} · ${info.head.slice(0, 7)} · ${status.entries.length} change(s)`;
 }
@@ -471,8 +479,6 @@ commitBtn.addEventListener("click", () => {
 			writeError.textContent = "";
 			// A commit moves HEAD: every diff range can change.
 			refreshBranches();
-			historyList.innerHTML = "";
-			historyLoaded = 0;
 			refreshHistory();
 			return refreshStatus().then(() => refreshDiff());
 		})
@@ -549,11 +555,20 @@ pullBtn.addEventListener("click", () => void runRemote("pull"));
 fetchBtn.addEventListener("click", () => void runRemote("fetch"));
 cancelBtn.addEventListener("click", () => remoteController?.abort());
 
-// ---- U6: history pane + branch operations ----
+// ---- U6 history pane + A3 windowing ----
+// The commit array grows unboundedly (cheap objects) while only a bounded
+// row window lives in the DOM (post-v1 Unit A3). Deliberate, documented
+// limit: ~200–400 B per commit means even 100k histories stay ≈20–40 MB —
+// unreachable for personal repos, while the DOM jank vector (the actual
+// budget) is capped. A page-cache redesign waits for a real need.
+// All renders go through renderHistoryWindow so selection and spacers stay
+// consistent.
 const HISTORY_PAGE = 50;
-let historyLoaded = 0;
+let historyCommits: LogCommit[] = [];
+let selectedOid: string | null = null;
+let historyScrollQueued = false;
 
-function appendCommitRow(commit: LogCommit): void {
+function buildCommitRow(commit: LogCommit): HTMLElement {
 	const item = document.createElement("li");
 	item.className = "history-row";
 	item.dataset.oid = commit.oid;
@@ -568,7 +583,51 @@ function appendCommitRow(commit: LogCommit): void {
 			: commit.subject;
 	item.append(short, subject);
 	item.addEventListener("click", () => viewCommit(commit.oid));
-	historyList.appendChild(item);
+	return item;
+}
+
+function historyRowHeight(): number {
+	const first = historyList.querySelector(".history-row");
+	const measured = first instanceof HTMLElement ? first.offsetHeight : 0;
+	return measured > 0 ? measured : FALLBACK_ROW_HEIGHT;
+}
+
+/** Rebuilds the visible row window; DOM rows stay bounded (~60 max). */
+function renderHistoryWindow(): void {
+	const total = historyCommits.length;
+	const rowH = historyRowHeight();
+	const win = windowRows(
+		total,
+		historyList.scrollTop,
+		rowH,
+		historyList.clientHeight,
+	);
+	historyList.innerHTML = "";
+	if (total === 0) return;
+	const top = document.createElement("li");
+	top.className = "history-spacer";
+	top.setAttribute("aria-hidden", "true");
+	top.style.height = `${win.topPad}px`;
+	historyList.append(top);
+	for (let i = win.start; i < win.end; i++) {
+		const row = buildCommitRow(historyCommits[i]);
+		if (historyCommits[i].oid === selectedOid) row.classList.add("selected");
+		historyList.append(row);
+	}
+	const bottom = document.createElement("li");
+	bottom.className = "history-spacer";
+	bottom.setAttribute("aria-hidden", "true");
+	bottom.style.height = `${win.bottomPad}px`;
+	historyList.append(bottom);
+}
+
+function queueHistoryWindowRender(): void {
+	if (historyScrollQueued) return;
+	historyScrollQueued = true;
+	requestAnimationFrame(() => {
+		historyScrollQueued = false;
+		renderHistoryWindow();
+	});
 }
 
 /** Streams the next page of history; append=false restarts the list. */
@@ -576,37 +635,55 @@ let historyLoading = false;
 // A full refresh requested while a page load is in flight (e.g. from the
 // pull path) is re-run on settle instead of dropped (CodeRabbit follow-up).
 let historyRefreshQueued = false;
+// Generation guard (CodeRabbit round 2): reset points below used to replace
+// the array while an earlier gitLog stream was still pushing into it —
+// cross-contaminating repositories/branches. Every load takes a generation;
+// stale callbacks no-op.
+let historyGen = 0;
 function refreshHistory(append = false): void {
 	const { root } = store.get();
 	if (!root) return;
 	if (historyLoading) {
-		if (!append) historyRefreshQueued = true;
+		// Queuing alone leaves the in-flight stream current: its callbacks
+		// would keep appending old-repository commits under the new root.
+		// Invalidate it now (CodeRabbit round 3); the queued re-run loads
+		// fresh on settle.
+		if (!append) {
+			historyRefreshQueued = true;
+			historyGen += 1;
+			historyCommits = [];
+			renderHistoryWindow();
+		}
 		return;
 	}
 	historyLoading = true;
 	olderBtn.disabled = true;
+	const gen = ++historyGen;
 	if (!append) {
-		historyLoaded = 0;
-		historyList.innerHTML = "";
+		historyCommits = [];
+		renderHistoryWindow();
 	}
 	void getPlatform()
 		.gitLog(
 			root,
-			{ limit: HISTORY_PAGE, skip: append ? historyLoaded : 0 },
+			{ limit: HISTORY_PAGE, skip: append ? historyCommits.length : 0 },
 			(commit) => {
-				appendCommitRow(commit);
-				historyLoaded += 1;
+				if (gen === historyGen) historyCommits.push(commit);
 			},
 		)
 		.then(({ count }) => {
+			if (gen !== historyGen) return;
 			olderBtn.hidden = count < HISTORY_PAGE;
+			renderHistoryWindow();
 		})
 		.catch((error) => {
+			if (gen !== historyGen) return;
 			olderBtn.hidden = true;
-			historyList.innerHTML = "";
+			historyCommits = [];
+			renderHistoryWindow();
 			const item = document.createElement("li");
 			item.textContent = `error: ${String(error)}`;
-			historyList.appendChild(item);
+			historyList.append(item);
 		})
 		.finally(() => {
 			// Serializes Older clicks: no duplicate pages from double-clicks
@@ -649,9 +726,8 @@ function viewCommit(oid: string): void {
 		diffTo: oid,
 	});
 	void refreshDiff();
-	for (const row of historyList.children) {
-		row.classList.toggle("selected", (row as HTMLElement).dataset.oid === oid);
-	}
+	selectedOid = oid;
+	renderHistoryWindow();
 }
 
 /** After the worktree itself changed (branch switch or successful pull):
@@ -669,8 +745,6 @@ function afterWorktreeChange(): Promise<void> {
 		})
 		.then(() => {
 			refreshBranches();
-			historyList.innerHTML = "";
-			historyLoaded = 0;
 			refreshHistory();
 			return refreshDiff();
 		});
@@ -704,6 +778,9 @@ branchCreateBtn.addEventListener("click", () => {
 });
 
 olderBtn.addEventListener("click", () => refreshHistory(true));
+historyList.addEventListener("scroll", queueHistoryWindowRender, {
+	passive: true,
+});
 
 /** Samples requestAnimationFrame gaps while stepping the diff scroll — a
  * cheap jank proxy for the scroll-smoothness budget. SMOKE-only. */

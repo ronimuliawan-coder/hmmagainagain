@@ -1,17 +1,25 @@
-// Conformance suite for the Platform contract. Every implementation (fake,
-// Bun main-process, RPC client) must pass `runConformance` against its own
-// fixture wiring. A new capability on Platform starts here.
+// Conformance suite for the Platform contract: fake and Bun main-process
+// implementations must pass `runConformance` against their own fixture
+// wiring. A new capability on Platform starts here. Deliberately NOT
+// exhaustive: commit flows live in the dedicated golden suites (they move
+// shared refs), and the RPC client is covered by its own mock suites —
+// extending either here is a separate, heavier harness (post-v1 Unit B).
 
 import { describe, expect, test } from "bun:test";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Platform } from "./platform";
 
 export interface ConformanceFixture {
-	/** A valid git worktree with at least one commit containing `trackedFile`. */
-	repoRoot: string;
-	/** A directory that is NOT a git repository. */
+	/** A valid git worktree containing `trackedFile`, with at least two
+	 * commits (paging tests skip the first). */
+	repoRoot: string /** A directory that is NOT a git repository. */;
 	nonRepoRoot: string;
 	trackedFile: string;
 	trackedContent: string;
+	/** Name of a remote that fetch/pull/push resolve against locally
+	 * (file-path bare repo for Bun, anything for the fake). */
+	remoteName: string;
 	/** A long-streaming git command whose output mentions `longRunMarker`. */
 	longRunArgs: string[];
 	longRunMarker: string;
@@ -43,6 +51,104 @@ export function runConformance(
 			await expect(
 				makePlatform().gitDiff(fixture.nonRepoRoot),
 			).rejects.toThrow();
+		});
+
+		test("gitStatus reports branch and entries; rejects a non-repo", async () => {
+			const status = await makePlatform().gitStatus(fixture.repoRoot);
+			expect(status.branch.head.length).toBeGreaterThan(0);
+			expect(Array.isArray(status.entries)).toBe(true);
+			await expect(
+				makePlatform().gitStatus(fixture.nonRepoRoot),
+			).rejects.toThrow();
+		});
+
+		test("gitBranches lists the current branch; rejects a non-repo", async () => {
+			const branches = await makePlatform().gitBranches(fixture.repoRoot);
+			expect(branches.filter((b) => b.current)).toHaveLength(1);
+			await expect(
+				makePlatform().gitBranches(fixture.nonRepoRoot),
+			).rejects.toThrow();
+		});
+
+		test("create, switch, and switch-back round-trip", async () => {
+			const platform = makePlatform();
+			const home = (await platform.gitBranches(fixture.repoRoot)).find(
+				(b) => b.current,
+			)?.name;
+			const name = `conformity-${Date.now()}`;
+			await platform.gitCreateBranch(fixture.repoRoot, name, true);
+			expect(
+				(await platform.gitBranches(fixture.repoRoot)).find((b) => b.current)
+					?.name,
+			).toBe(name);
+			if (home) await platform.gitSwitchBranch(fixture.repoRoot, home);
+			expect(
+				(await platform.gitBranches(fixture.repoRoot)).find((b) => b.current)
+					?.name,
+			).toBe(home ?? name);
+		});
+
+		test("stage then unstage round-trips the index", async () => {
+			// Staging needs a real modification: touch the tracked file only
+			// when it exists on disk (bun fixture), then restore it exactly.
+			// The fake has no worktree and starts staged — both paths assert
+			// the staged/unstaged transitions, not the starting state.
+			const realPath = join(fixture.repoRoot, fixture.trackedFile);
+			const saved = existsSync(realPath)
+				? readFileSync(realPath, "utf8")
+				: null;
+			if (saved !== null) writeFileSync(realPath, `${saved}touch\n`);
+			try {
+				const platform = makePlatform();
+				await platform.stagePaths(fixture.repoRoot, [fixture.trackedFile]);
+				const staged = await platform.gitStatus(fixture.repoRoot);
+				expect(
+					staged.entries.some(
+						(e) => e.path === fixture.trackedFile && e.indexStatus !== ".",
+					),
+				).toBe(true);
+				await platform.unstagePaths(fixture.repoRoot, [fixture.trackedFile]);
+				const clean = await platform.gitStatus(fixture.repoRoot);
+				expect(
+					clean.entries.some(
+						(e) => e.path === fixture.trackedFile && e.indexStatus !== ".",
+					),
+				).toBe(false);
+			} finally {
+				if (saved !== null) writeFileSync(realPath, saved);
+			}
+		});
+
+		test("gitLog honors limit and skip", async () => {
+			const firstPage: string[] = [];
+			const first = await makePlatform().gitLog(
+				fixture.repoRoot,
+				{ limit: 1 },
+				(commit) => firstPage.push(commit.oid),
+			);
+			expect(first.count).toBe(1);
+			expect(firstPage).toHaveLength(1);
+			// Fixtures hold at least two commits: the skipped page must deliver
+			// a *different* commit. OIDs, not subjects — subjects may repeat.
+			const secondPage: string[] = [];
+			const rest = await makePlatform().gitLog(
+				fixture.repoRoot,
+				{ skip: 1, limit: 5 },
+				(commit) => secondPage.push(commit.oid),
+			);
+			expect(rest.count).toBeGreaterThanOrEqual(1);
+			expect(secondPage).toHaveLength(rest.count);
+			expect(secondPage[0]).not.toBe(firstPage[0]);
+		});
+
+		test("gitRemote fetch resolves against the fixture remote", async () => {
+			const result = await makePlatform().gitRemote(
+				fixture.repoRoot,
+				"fetch",
+				{ remote: fixture.remoteName },
+				() => {},
+			);
+			expect(result.ok).toBe(true);
 		});
 
 		test("runGit returns exit code and verbatim stdout", async () => {
