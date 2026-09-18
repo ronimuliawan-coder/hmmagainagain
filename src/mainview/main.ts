@@ -42,6 +42,7 @@ requestAnimationFrame(() => {
 
 const RECENTS_KEY = "hmmagainagain.recents";
 const THEME_KEY = "hmmagainagain.theme";
+const TAB_KEY = "hmmagainagain.sidebar-tab";
 const REFRESH_DEBOUNCE_MS = 300;
 
 /** Fail-fast lookup: a missing id is a template/TS mismatch, not a runtime case. */
@@ -74,6 +75,11 @@ const openBtn = byId<HTMLButtonElement>("open-btn");
 const browseBtn = byId<HTMLButtonElement>("browse-btn");
 const themeBtn = byId<HTMLButtonElement>("theme-btn");
 const themeVariant = byId<HTMLSelectElement>("theme-variant");
+const changesCount = byId<HTMLSpanElement>("changes-count");
+const tabButtons = [
+	...document.querySelectorAll<HTMLButtonElement>("#sidebar-tabs [data-tab]"),
+];
+const tabPanes = [...document.querySelectorAll<HTMLElement>("[data-tabpane]")];
 const diffContainer = byId<HTMLDivElement>("diff-container");
 const diffInfo = byId<HTMLSpanElement>("diff-info");
 const rangeButtons = [
@@ -248,6 +254,8 @@ function render(state: AppState): void {
 		).length;
 		stagedCount.textContent = `${staged} staged`;
 		commitBtn.disabled = staged === 0;
+		const total = state.status.entries.length;
+		changesCount.textContent = total > 0 ? String(total) : "";
 	}
 	for (const button of rangeButtons) {
 		button.classList.toggle(
@@ -631,6 +639,45 @@ themeVariant.addEventListener("change", () => {
 		applyTheme({ ...shellTheme, variant: themeVariant.value });
 	}
 });
+
+// ---- Sidebar tabs (Files | Changes | History) ----
+type SidebarTab = "files" | "changes" | "history";
+
+function setTab(tab: SidebarTab): void {
+	for (const button of tabButtons) {
+		button.setAttribute("aria-selected", String(button.dataset.tab === tab));
+	}
+	for (const pane of tabPanes) {
+		pane.hidden = pane.dataset.tabpane !== tab;
+	}
+	try {
+		localStorage.setItem(TAB_KEY, tab);
+	} catch {
+		// storage unavailable — tab is best-effort
+	}
+}
+
+{
+	let initial: SidebarTab = "changes";
+	try {
+		const stored = localStorage.getItem(TAB_KEY);
+		if (stored === "files" || stored === "changes" || stored === "history") {
+			initial = stored;
+		}
+	} catch {
+		// storage unavailable — fall back to changes
+	}
+	setTab(initial);
+}
+
+for (const button of tabButtons) {
+	button.addEventListener("click", () => {
+		const tab = button.dataset.tab;
+		if (tab === "files" || tab === "changes" || tab === "history") {
+			setTab(tab);
+		}
+	});
+}
 
 // ---- U7: push/pull/fetch ----
 let remoteOpRunning = false;

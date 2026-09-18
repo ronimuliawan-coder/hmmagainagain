@@ -8,48 +8,69 @@
   <body>
     <header id="topbar">
       <strong>hmmagainagain</strong>
+      <div class="topbar-group" id="repo-group">
         <input id="repo-path" placeholder="/path/to/repository" list="recent-list" aria-label="Repository path" />
         <datalist id="recent-list"></datalist>
-      <button id="open-btn" type="button">Open</button>
-      <button id="browse-btn" type="button" title="Pick a repository folder">Browse…</button>
-      <button id="theme-btn" type="button" aria-pressed="false" title="Toggle light/dark theme">Light</button>
-      <select id="theme-variant" aria-label="Theme variant">
-        <option value="default">Default</option>
-        <option value="soft">Soft</option>
-        <option value="vibrant">Vibrant</option>
-        <option value="protanopia-deuteranopia">Colorblind-safe (red-green)</option>
-        <option value="tritanopia">Colorblind-safe (blue-yellow)</option>
-      </select>
+        <button id="open-btn" type="button">Open</button>
+        <button id="browse-btn" type="button" title="Pick a repository folder">Browse…</button>
+      </div>
       <span id="repo-info">no repository open</span>
+      <div class="topbar-group" id="remote-group">
+        <button type="button" id="fetch-btn" disabled>Fetch</button>
+        <button type="button" id="pull-btn" disabled>Pull</button>
+        <button type="button" id="push-btn" disabled>Push</button>
+        <button type="button" id="cancel-btn" disabled>Cancel</button>
+      </div>
+      <div class="topbar-group" id="theme-group">
+        <button id="theme-btn" type="button" aria-pressed="false" title="Toggle light/dark theme">Light</button>
+        <select id="theme-variant" aria-label="Theme variant">
+          <option value="default">Default</option>
+          <option value="soft">Soft</option>
+          <option value="vibrant">Vibrant</option>
+          <option value="protanopia-deuteranopia">Colorblind-safe (red-green)</option>
+          <option value="tritanopia">Colorblind-safe (blue-yellow)</option>
+        </select>
+      </div>
     </header>
     <main id="shell">
-      <section id="tree-pane">
-        <h2>Worktree</h2>
-        <div id="tree-container"></div>
-      </section>
-      <section id="status-pane">
-        <h2>Changed files</h2>
-        <ul id="status-list"></ul>
-        <div id="remote-bar">
-          <button type="button" id="fetch-btn" disabled>Fetch</button>
-          <button type="button" id="pull-btn" disabled>Pull</button>
-          <button type="button" id="push-btn" disabled>Push</button>
-          <button type="button" id="cancel-btn" disabled>Cancel</button>
+      <aside id="sidebar">
+        <div id="sidebar-tabs" role="tablist" aria-label="Sidebar views">
+          <button type="button" data-tab="files" role="tab">Files</button>
+          <button type="button" data-tab="changes" role="tab">Changes <span id="changes-count"></span></button>
+          <button type="button" data-tab="history" role="tab">History</button>
         </div>
-        <pre id="remote-progress"></pre>
-        <div id="commit-box">
-          <pre id="write-error"></pre>
-          <textarea
-            id="commit-message"
-            placeholder="Commit message"
-            rows="3"
-          ></textarea>
-          <div id="commit-actions">
-            <span id="staged-count">0 staged</span>
-            <button type="button" id="commit-btn" disabled>Commit</button>
+        <section id="tab-files" data-tabpane="files" role="tabpanel" aria-label="Worktree files">
+          <div id="tree-container"></div>
+        </section>
+        <section id="tab-changes" data-tabpane="changes" role="tabpanel" aria-label="Changed files" hidden>
+          <ul id="status-list"></ul>
+        </section>
+        <section id="tab-history" data-tabpane="history" role="tabpanel" aria-label="Branches and history" hidden>
+          <select id="branch-select" aria-label="current branch"></select>
+          <div id="branch-create-row">
+            <input id="branch-name" placeholder="new-branch-name" aria-label="New branch name" />
+            <button type="button" id="branch-create-btn">Create</button>
           </div>
-        </div>
-      </section>
+          <p class="pane-hint">Click views a commit · Ctrl-click two to compare</p>
+          <div id="history-list" tabindex="0" role="listbox" aria-label="Commit history"></div>
+          <button type="button" id="older-btn" hidden>Older</button>
+        </section>
+        <footer id="sidebar-footer">
+          <pre id="remote-progress"></pre>
+          <div id="commit-box">
+            <pre id="write-error"></pre>
+            <textarea
+              id="commit-message"
+              placeholder="Commit message"
+              rows="3"
+            ></textarea>
+            <div id="commit-actions">
+              <span id="staged-count">0 staged</span>
+              <button type="button" id="commit-btn" disabled>Commit</button>
+            </div>
+          </div>
+        </footer>
+      </aside>
       <section id="diff-pane">
         <div id="diff-toolbar">
           <button type="button" data-diff-range="worktree">Worktree</button>
@@ -66,18 +87,6 @@
           </button>
         </div>
         <div id="diff-container"></div>
-      </section>
-      <section id="history-pane">
-        <h2>Branches</h2>
-        <select id="branch-select" aria-label="current branch"></select>
-        <div id="branch-create-row">
-          <input id="branch-name" placeholder="new-branch-name" aria-label="New branch name" />
-          <button type="button" id="branch-create-btn">Create</button>
-        </div>
-        <h2>History</h2>
-        <p class="pane-hint">Click views a commit · Ctrl-click two to compare</p>
-        <div id="history-list" tabindex="0" role="listbox" aria-label="Commit history"></div>
-        <button type="button" id="older-btn" hidden>Older</button>
       </section>
     </main>
     <script type="module" src="/main.ts"></script>
