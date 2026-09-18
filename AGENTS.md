@@ -59,10 +59,10 @@ findings on the originating GitHub pull-request branch
 ## CI and validation
 
 Today the gate is local: `bun run check` (typecheck + biome + bun test) must pass before
-every commit. A GitHub Actions product workflow arrives with the first units that need
-shared validation (U1 onward); until then CI is deliberately absent rather than
-decorative. Avoid pushing many small commits to an open pull request once product CI
-exists — each product-code push is a full run.
+every commit. Product CI (`.github/workflows/product.yml`: same gate plus a Linux
+stable build, Ubuntu-only) runs on every push and pull request — green CI on the
+exact head revision is required before merge. Avoid pushing many small commits to an
+open pull request — each product-code push is a full run.
 
 ## Conventions
 
