@@ -55,9 +55,11 @@ jobs:
           cache: |
             bun
             apt
+          # Whole ~/.hutch home (not subpaths): the install marker lives at
+          # its root, and mounting only subdirs leaves an unmarked home the
+          # installer refuses to claim. Version upgrades need a cache bust.
           path: |
-            ~/.hutch/bin
-            ~/.hutch/releases
+            ~/.hutch
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
