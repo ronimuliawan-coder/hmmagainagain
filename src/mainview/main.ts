@@ -644,7 +644,16 @@ function refreshHistory(append = false): void {
 	const { root } = store.get();
 	if (!root) return;
 	if (historyLoading) {
-		if (!append) historyRefreshQueued = true;
+		// Queuing alone leaves the in-flight stream current: its callbacks
+		// would keep appending old-repository commits under the new root.
+		// Invalidate it now (CodeRabbit round 3); the queued re-run loads
+		// fresh on settle.
+		if (!append) {
+			historyRefreshQueued = true;
+			historyGen += 1;
+			historyCommits = [];
+			renderHistoryWindow();
+		}
 		return;
 	}
 	historyLoading = true;
