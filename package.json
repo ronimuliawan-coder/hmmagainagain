@@ -9,8 +9,10 @@
 		"format": "biome format --write .",
 		"test": "bun test",
 		"check": "bun run typecheck && bun run lint && bun run test",
+		"build:web": "vite build",
 		"install:deps": "bun install",
 		"dev": "electrobun dev",
+		"predev": "bun run build:web",
 		"build": "electrobun build"
 	},
 	"devDependencies": {
