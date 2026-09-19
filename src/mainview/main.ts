@@ -179,16 +179,28 @@ function renderRecents(): void {
 }
 
 function renderRepoInfo(info: RepoInfo, status: GitStatus): void {
-	let badge = "";
+	repoInfo.innerHTML = "";
+	const branch = document.createElement("span");
+	branch.className = "repo-branch";
+	branch.textContent = info.branch;
+	const head = document.createElement("span");
+	head.className = "repo-head";
+	head.textContent = info.head.slice(0, 7);
+	const count = document.createElement("span");
+	count.className = "repo-count";
+	const total = status.entries.length;
+	count.textContent = total === 1 ? "1 change" : `${total} changes`;
+	repoInfo.append(branch, head, count);
 	const { ahead, behind } = status.branch;
-	if (ahead !== undefined && behind !== undefined) {
-		badge = ` · ↑${ahead} ↓${behind}`;
-	} else if (ahead !== undefined) {
-		badge = ` · ↑${ahead}`;
-	} else if (behind !== undefined) {
-		badge = ` · ↓${behind}`;
+	if (ahead !== undefined || behind !== undefined) {
+		const sync = document.createElement("span");
+		sync.className = "repo-ahead";
+		const parts: string[] = [];
+		if (ahead !== undefined && ahead > 0) parts.push(`↑${ahead}`);
+		if (behind !== undefined && behind > 0) parts.push(`↓${behind}`);
+		sync.textContent = parts.join(" ");
+		if (sync.textContent) repoInfo.append(sync);
 	}
-	repoInfo.textContent = `${info.branch} · ${info.head.slice(0, 7)} · ${status.entries.length} change(s)${badge}`;
 	// Never re-enable mid-operation: watcher-driven renders fire while a
 	// remote op is in flight (CodeRabbit U0–U8 review). Cancel stays on its
 	// own lifecycle in runRemote.
@@ -331,7 +343,7 @@ function scheduleStatusRefresh(): void {
 	}, REFRESH_DEBOUNCE_MS);
 }
 
-async function openRepo(root: string): Promise<string> {
+async function openRepo(root: string): Promise<void> {
 	const [status, info, paths] = await Promise.all([
 		getPlatform().gitStatus(root),
 		getPlatform().readRepo(root),
@@ -358,7 +370,6 @@ async function openRepo(root: string): Promise<string> {
 	void refreshDiff();
 	refreshBranches();
 	refreshHistory();
-	return `${info.branch} · ${info.head.slice(0, 7)} · ${status.entries.length} change(s)`;
 }
 
 openBtn.addEventListener("click", () => {
@@ -368,8 +379,7 @@ openBtn.addEventListener("click", () => {
 	pullBtn.disabled = true;
 	fetchBtn.disabled = true;
 	openRepo(root)
-		.then((summary) => {
-			repoInfo.textContent = summary;
+		.then(() => {
 			pushBtn.disabled = false;
 			pullBtn.disabled = false;
 			fetchBtn.disabled = false;

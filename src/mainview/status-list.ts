@@ -48,6 +48,7 @@ function buildRow(
 ): HTMLElement {
 	const item = document.createElement("li");
 	item.dataset.path = entry.path;
+	item.dataset.side = stagedSide ? "staged" : "unstaged";
 	item.tabIndex = 0;
 	const active = stagedSide ? entry.indexStatus : entry.worktreeStatus;
 
@@ -105,6 +106,7 @@ function buildGroupHeader(
 ): HTMLElement {
 	const header = document.createElement("li");
 	header.className = "status-group-header";
+	header.dataset.side = unstage ? "staged" : "unstaged";
 	const name = document.createElement("span");
 	name.className = "status-group-title";
 	name.textContent = `${title} (${count})`;
