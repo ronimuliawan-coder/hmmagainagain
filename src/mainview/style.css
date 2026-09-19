@@ -28,7 +28,6 @@
 	--fs-small: 11.5px;
 	--lh-body: 1.5;
 	--lh-list: 1.45;
-	--rail-h: 46px;
 	--stamp: 24px;
 }
 
@@ -57,6 +56,9 @@
 body {
 	margin: 0;
 	padding: 0;
+	display: flex;
+	flex-direction: column;
+	height: 100vh;
 	font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
 	font-size: var(--fs-base);
 	line-height: var(--lh-body);
@@ -128,9 +130,10 @@ textarea {
 
 #topbar {
 	display: flex;
-	gap: 12px;
+	flex: none;
+	flex-wrap: wrap;
+	gap: 6px 12px;
 	align-items: center;
-	min-height: var(--rail-h);
 	padding: 6px 12px;
 	background: var(--panel);
 	border-bottom: 1px solid var(--border);
@@ -144,18 +147,19 @@ textarea {
 
 .topbar-group {
 	display: flex;
+	flex: none;
 	gap: 6px;
 	align-items: center;
+	min-width: 0;
 }
 
 #repo-group {
-	flex: 1;
-	min-width: 0;
+	flex: 2 1 240px;
 }
 
 #repo-path {
 	flex: 1;
-	min-width: 200px;
+	min-width: 0;
 	font-family:
 		ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, monospace;
 	font-size: var(--fs-list);
@@ -165,8 +169,11 @@ textarea {
    No dot-joined meta string — each segment is its own element. */
 #repo-info {
 	display: flex;
+	flex: none;
 	gap: 6px;
 	align-items: baseline;
+	max-width: 100%;
+	overflow: hidden;
 	font-size: var(--fs-list);
 	color: var(--muted);
 	white-space: nowrap;
@@ -196,8 +203,9 @@ textarea {
 
 #shell {
 	display: grid;
+	flex: 1;
+	min-height: 0;
 	grid-template-columns: 330px minmax(0, 1fr);
-	height: calc(100vh - var(--rail-h));
 }
 
 #shell > aside,
@@ -528,9 +536,12 @@ textarea {
 	padding: 0;
 }
 
-/* Staging rail: Worktree/Index/HEAD read as one segmented control. */
+/* Staging rail: range switch, commit range, and view options. Wraps
+   instead of overflowing — buttons never squash, never overlap. */
 #diff-toolbar {
 	display: flex;
+	flex: none;
+	flex-wrap: wrap;
 	gap: 6px;
 	align-items: center;
 	padding: 8px 12px;
@@ -539,20 +550,13 @@ textarea {
 	font-size: var(--fs-list);
 }
 
+#diff-toolbar button {
+	flex: none;
+}
+
 #diff-toolbar button[data-diff-range] {
 	padding: 3px 12px;
 	color: var(--muted);
-	border-radius: 0;
-	margin-left: -7px;
-}
-
-#diff-toolbar button[data-diff-range]:first-of-type {
-	border-radius: 6px 0 0 6px;
-	margin-left: 0;
-}
-
-#diff-toolbar button[data-diff-range]:last-of-type {
-	border-radius: 0 6px 6px 0;
 }
 
 #diff-toolbar button.active {
@@ -562,6 +566,7 @@ textarea {
 }
 
 #diff-toolbar input {
+	flex: none;
 	width: 96px;
 	padding: 3px 6px;
 	font-size: var(--fs-list);
