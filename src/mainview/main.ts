@@ -26,11 +26,13 @@ import { staticTheme } from "./static-themes";
 import { renderStatusList } from "./status-list";
 import { createStore } from "./store";
 import {
-	isThemeVariant,
+	cycleThemeVariant,
 	knownThemeNames,
 	parseStoredTheme,
 	pierreThemeName,
 	type ShellTheme,
+	themeVariantLabel,
+	themeVariantTitle,
 } from "./theme-names";
 
 // U8b cold-start proxy: first compositor frame in the webview, on the shared
@@ -60,7 +62,7 @@ const repoInput = byId<HTMLInputElement>("repo-path");
 const openBtn = byId<HTMLButtonElement>("open-btn");
 const browseBtn = byId<HTMLButtonElement>("browse-btn");
 const themeBtn = byId<HTMLButtonElement>("theme-btn");
-const themeVariant = byId<HTMLSelectElement>("theme-variant");
+const themeStyleBtn = byId<HTMLButtonElement>("theme-style-btn");
 const treeFilter = byId<HTMLInputElement>("tree-filter");
 const welcome = byId<HTMLDivElement>("welcome");
 const welcomeRecents = byId<HTMLDivElement>("welcome-recents");
@@ -585,7 +587,8 @@ function applyTheme(next: ShellTheme): void {
 	document.documentElement.dataset.theme = next.scheme;
 	themeBtn.textContent = next.scheme === "dark" ? "Light" : "Dark";
 	themeBtn.setAttribute("aria-pressed", String(next.scheme === "light"));
-	themeVariant.value = next.variant;
+	themeStyleBtn.textContent = themeVariantLabel(next.variant);
+	themeStyleBtn.title = themeVariantTitle(next.variant);
 	persistTheme();
 	// The worker pool binds theme names at creation: remount the diff view
 	// so the variant takes effect, restoring patch + style after.
@@ -630,10 +633,8 @@ themeBtn.addEventListener("click", () => {
 	});
 });
 
-themeVariant.addEventListener("change", () => {
-	if (isThemeVariant(themeVariant.value)) {
-		applyTheme({ ...shellTheme, variant: themeVariant.value });
-	}
+themeStyleBtn.addEventListener("click", () => {
+	applyTheme({ ...shellTheme, variant: cycleThemeVariant(shellTheme.variant) });
 });
 
 // ---- Sidebar tabs (Files | Changes | History) ----

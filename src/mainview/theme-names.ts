@@ -28,6 +28,35 @@ const VARIANTS: readonly ThemeVariant[] = [
 	"tritanopia",
 ];
 
+/** Short button labels (the strip is narrow); full names live in titles. */
+const VARIANT_LABELS: Record<ThemeVariant, string> = {
+	default: "Default",
+	soft: "Soft",
+	vibrant: "Vibrant",
+	"protanopia-deuteranopia": "Red-green",
+	tritanopia: "Blue-yellow",
+};
+
+const VARIANT_TITLES: Record<ThemeVariant, string> = {
+	default: "Style: default",
+	soft: "Style: soft",
+	vibrant: "Style: vibrant",
+	"protanopia-deuteranopia": "Style: colorblind-safe red-green",
+	tritanopia: "Style: colorblind-safe blue-yellow",
+};
+
+export const themeVariantLabel = (variant: ThemeVariant): string =>
+	VARIANT_LABELS[variant];
+
+export const themeVariantTitle = (variant: ThemeVariant): string =>
+	VARIANT_TITLES[variant];
+
+/** Next style in the cycle order (wraps around). */
+export function cycleThemeVariant(current: ThemeVariant): ThemeVariant {
+	const next = VARIANTS[(VARIANTS.indexOf(current) + 1) % VARIANTS.length];
+	return next ?? "default";
+}
+
 export function isThemeVariant(value: unknown): value is ThemeVariant {
 	return (
 		typeof value === "string" && (VARIANTS as readonly string[]).includes(value)
