@@ -285,6 +285,33 @@ textarea {
 	display: none;
 }
 
+/* Appearance: an app-scoped preference, deliberately out of the topbar ops
+   rail — a quiet pinned strip at the bottom of the sidebar. */
+#theme-group {
+	border-top: 1px solid var(--border);
+	padding: 6px 12px;
+	display: flex;
+	flex: none;
+	gap: 6px;
+	align-items: center;
+}
+
+#theme-group .appearance-label {
+	margin-right: auto;
+	font-size: var(--fs-small);
+	color: var(--muted);
+}
+
+#theme-btn {
+	flex: none;
+}
+
+#theme-variant {
+	min-width: 0;
+	max-width: 148px;
+	text-overflow: ellipsis;
+}
+
 #tree-container {
 	flex: 1;
 	min-height: 0;
