@@ -275,7 +275,14 @@ textarea {
 	padding: 10px 12px;
 	display: flex;
 	flex-direction: column;
-	gap: 8px;
+	gap: 6px;
+}
+
+/* Author display:flex beats the UA [hidden] — same defect class as the
+   diff toolbar leak (RON-329). Both stay hidden until a repo is open. */
+#sidebar-footer[hidden],
+#diff-toolbar[hidden] {
+	display: none;
 }
 
 #tree-container {
