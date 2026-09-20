@@ -306,9 +306,14 @@ textarea {
 	flex: none;
 }
 
+/* Compact variant picker: small type, tight padding, capped width with
+   ellipsis (RON-336). The closed state truncates the two long labels;
+   the open menu still shows full names. */
 #theme-variant {
 	min-width: 0;
-	max-width: 148px;
+	max-width: 96px;
+	padding: 2px 4px;
+	font-size: var(--fs-small);
 	text-overflow: ellipsis;
 }
 
