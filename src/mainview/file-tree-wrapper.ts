@@ -27,6 +27,14 @@ export function mountFileTree(container: HTMLElement): TreeHandle {
 		// Workbench density + filterable (diffshub parity: compact rows).
 		density: "compact",
 		search: true,
+		// Render buffer above/below the viewport. Upstream default is 10;
+		// measured (RON-332, 20k-row synthetic tree, headless Chromium):
+		// overscan 40 → 74fps, 10 → ~140fps, 4 → 211fps, 2 → 236fps.
+		// Per-frame Preact cost dominates, so a small buffer buys the most
+		// headroom; 4 keeps fast-fling coverage on 60Hz displays.
+		// It does not fix the upstream event flood (sync update per scroll
+		// event, no frame coalescing) — that needs an upstream change.
+		overscan: 4,
 		// Our own filter box + the / shortcut drive the search session, so
 		// the built-in box is redundant chrome. Hidden through the supported
 		// unsafeCSS shadow seam — the box carries a data attribute, not a
