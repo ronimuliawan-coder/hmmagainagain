@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { parseStoredTheme, pierreThemeName } from "./theme-names";
+import {
+	cycleThemeVariant,
+	parseStoredTheme,
+	pierreThemeName,
+	themeVariantLabel,
+	themeVariantTitle,
+} from "./theme-names";
 
 describe("pierreThemeName", () => {
 	test("default variants are the canonical pair", () => {
@@ -42,5 +48,23 @@ describe("parseStoredTheme", () => {
 		expect(
 			parseStoredTheme(JSON.stringify({ scheme: "dark", variant: "neon" })),
 		).toEqual({ scheme: "dark", variant: "default" });
+	});
+});
+
+describe("style cycle button", () => {
+	test("cycles in order and wraps around", () => {
+		expect(cycleThemeVariant("default")).toBe("soft");
+		expect(cycleThemeVariant("soft")).toBe("vibrant");
+		expect(cycleThemeVariant("vibrant")).toBe("protanopia-deuteranopia");
+		expect(cycleThemeVariant("protanopia-deuteranopia")).toBe("tritanopia");
+		expect(cycleThemeVariant("tritanopia")).toBe("default");
+	});
+
+	test("labels stay short, titles carry the full names", () => {
+		expect(themeVariantLabel("protanopia-deuteranopia")).toBe("Red-green");
+		expect(themeVariantLabel("tritanopia")).toBe("Blue-yellow");
+		expect(themeVariantTitle("protanopia-deuteranopia")).toContain(
+			"colorblind-safe",
+		);
 	});
 });
