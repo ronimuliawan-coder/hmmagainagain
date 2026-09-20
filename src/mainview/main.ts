@@ -1,5 +1,4 @@
 import "./style.css";
-import { resolveTheme } from "@pierre/diffs";
 import { themeToTreeStyles } from "@pierre/trees";
 import type {
 	GitDiffOptions,
@@ -23,6 +22,7 @@ import {
 	isElectrobun,
 	sendSelfTestResult,
 } from "./platform";
+import { staticTheme } from "./static-themes";
 import { renderStatusList } from "./status-list";
 import { createStore } from "./store";
 import {
@@ -555,31 +555,29 @@ function persistTheme(): void {
 	}
 }
 
-/** Applies the resolved Pierre theme to the shell chrome and the file
- * tree. Failures clear the previously applied inline vars so the
- * [data-theme] stylesheet values take over — a stale dark inline layer used
- * to pin the shell dark across scheme flips (RON-338). The reason is logged,
- * not swallowed: a failing resolution is the diagnostic that matters. */
+/** Applies the bundled Pierre theme to the shell chrome and the file tree.
+ * Synchronous: themes are statically imported (static-themes.ts) because the
+ * dynamic resolveTheme path fails to import variant chunks in webview
+ * runtimes (RON-340). Failures still clear stale inline vars so the
+ * [data-theme] stylesheet values take over, and log the reason. */
 let appliedChromeKeys: string[] = [];
 
 function applyPierreTheme(): void {
-	const name = pierreThemeName(shellTheme.scheme, shellTheme.variant);
-	void resolveTheme(name)
-		.then((resolved) => {
-			const tokens = deriveChromeTokens(resolved, shellTheme.scheme);
-			appliedChromeKeys = Object.keys(tokens);
-			for (const [key, value] of Object.entries(tokens)) {
-				document.documentElement.style.setProperty(key, value);
-			}
-			tree?.setTheme(themeToTreeStyles(resolved));
-		})
-		.catch((error) => {
-			for (const key of appliedChromeKeys) {
-				document.documentElement.style.removeProperty(key);
-			}
-			appliedChromeKeys = [];
-			console.warn(`[theme] resolveTheme(${name}) failed: ${String(error)}`);
-		});
+	try {
+		const theme = staticTheme(shellTheme.scheme, shellTheme.variant);
+		const tokens = deriveChromeTokens(theme, shellTheme.scheme);
+		appliedChromeKeys = Object.keys(tokens);
+		for (const [key, value] of Object.entries(tokens)) {
+			document.documentElement.style.setProperty(key, value);
+		}
+		tree?.setTheme(themeToTreeStyles(theme));
+	} catch (error) {
+		for (const key of appliedChromeKeys) {
+			document.documentElement.style.removeProperty(key);
+		}
+		appliedChromeKeys = [];
+		console.warn(`[theme] static theme apply failed: ${String(error)}`);
+	}
 }
 
 function applyTheme(next: ShellTheme): void {
