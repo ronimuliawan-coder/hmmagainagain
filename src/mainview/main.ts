@@ -556,20 +556,30 @@ function persistTheme(): void {
 }
 
 /** Applies the resolved Pierre theme to the shell chrome and the file
- * tree; failures keep the stylesheet hand values (theme must never break
- * repo browsing). One resolution serves both consumers. */
+ * tree. Failures clear the previously applied inline vars so the
+ * [data-theme] stylesheet values take over — a stale dark inline layer used
+ * to pin the shell dark across scheme flips (RON-338). The reason is logged,
+ * not swallowed: a failing resolution is the diagnostic that matters. */
+let appliedChromeKeys: string[] = [];
+
 function applyPierreTheme(): void {
 	const name = pierreThemeName(shellTheme.scheme, shellTheme.variant);
 	void resolveTheme(name)
 		.then((resolved) => {
-			for (const [key, value] of Object.entries(
-				deriveChromeTokens(resolved, shellTheme.scheme),
-			)) {
+			const tokens = deriveChromeTokens(resolved, shellTheme.scheme);
+			appliedChromeKeys = Object.keys(tokens);
+			for (const [key, value] of Object.entries(tokens)) {
 				document.documentElement.style.setProperty(key, value);
 			}
 			tree?.setTheme(themeToTreeStyles(resolved));
 		})
-		.catch(() => {});
+		.catch((error) => {
+			for (const key of appliedChromeKeys) {
+				document.documentElement.style.removeProperty(key);
+			}
+			appliedChromeKeys = [];
+			console.warn(`[theme] resolveTheme(${name}) failed: ${String(error)}`);
+		});
 }
 
 function applyTheme(next: ShellTheme): void {
