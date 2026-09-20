@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { runConformance } from "./platform.conformance";
-import { buildFakeFixture } from "./platform-fake";
+import { buildFakeFixture, FAKE_BIG_REPO } from "./platform-fake";
 
 const { platform, fixture } = buildFakeFixture();
 runConformance(() => platform, fixture);
@@ -152,5 +152,56 @@ describe("fake platform pickDirectory", () => {
 	test("always resolves null (no native dialog in a browser)", async () => {
 		const { platform } = buildFakeFixture();
 		await expect(platform.pickDirectory()).resolves.toBeNull();
+	});
+});
+
+describe("fake platform big root (scroll stress, RON-343)", () => {
+	test("serves thousands of files and hundreds of commits", async () => {
+		const { platform } = buildFakeFixture();
+		const info = await platform.readRepo(FAKE_BIG_REPO);
+		expect(info.branch).toBe("main");
+
+		const status = await platform.gitStatus(FAKE_BIG_REPO);
+		expect(status.entries.length).toBeGreaterThan(1000);
+		const sides = new Set(
+			status.entries.map((e) => `${e.indexStatus}/${e.worktreeStatus}`),
+		);
+		expect(sides.has("M/.")).toBe(true);
+		expect(sides.has("./M")).toBe(true);
+		expect(sides.has("?/?")).toBe(true);
+
+		const paths = await platform.gitWorktreePaths(FAKE_BIG_REPO);
+		expect(paths.length).toBe(status.entries.length);
+		expect([...paths].sort()).toEqual(paths);
+	});
+
+	test("paginates big history across windows", async () => {
+		const { platform } = buildFakeFixture();
+		const first: string[] = [];
+		const head = await platform.gitLog(
+			FAKE_BIG_REPO,
+			{ limit: 50, skip: 0 },
+			(c) => first.push(c.subject),
+		);
+		expect(head).toEqual({ count: 50 });
+		expect(first[0]).toContain("300");
+
+		const tail: string[] = [];
+		const rest = await platform.gitLog(
+			FAKE_BIG_REPO,
+			{ limit: 500, skip: 290 },
+			(c) => tail.push(c.subject),
+		);
+		expect(rest.count).toBeLessThan(500);
+		expect(rest.count).toBeGreaterThan(0);
+		expect(tail.at(-1)).toContain("1");
+	});
+
+	test("writes resolve without state tracking", async () => {
+		const { platform } = buildFakeFixture();
+		await platform.stagePaths(FAKE_BIG_REPO, ["a.txt"]);
+		await platform.unstagePaths(FAKE_BIG_REPO, ["a.txt"]);
+		await platform.applyIndexPatch(FAKE_BIG_REPO, "patch");
+		await platform.commit(FAKE_BIG_REPO, "big commit");
 	});
 });
