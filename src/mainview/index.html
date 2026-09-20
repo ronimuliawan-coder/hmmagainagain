@@ -21,16 +21,6 @@
         <button type="button" id="push-btn" disabled>Push</button>
         <button type="button" id="cancel-btn" disabled>Cancel</button>
       </div>
-      <div class="topbar-group" id="theme-group">
-        <button id="theme-btn" type="button" aria-pressed="false" title="Toggle light/dark theme">Light</button>
-        <select id="theme-variant" aria-label="Theme variant">
-          <option value="default">Default</option>
-          <option value="soft">Soft</option>
-          <option value="vibrant">Vibrant</option>
-          <option value="protanopia-deuteranopia">Colorblind-safe (red-green)</option>
-          <option value="tritanopia">Colorblind-safe (blue-yellow)</option>
-        </select>
-      </div>
     </header>
     <main id="shell">
       <aside id="sidebar">
@@ -71,6 +61,17 @@
             </div>
           </div>
         </footer>
+        <div id="theme-group">
+          <span class="appearance-label">Appearance</span>
+          <button id="theme-btn" type="button" aria-pressed="false" title="Toggle light/dark theme">Light</button>
+          <select id="theme-variant" aria-label="Theme variant">
+            <option value="default">Default</option>
+            <option value="soft">Soft</option>
+            <option value="vibrant">Vibrant</option>
+            <option value="protanopia-deuteranopia">Red-green safe</option>
+            <option value="tritanopia">Blue-yellow safe</option>
+          </select>
+        </div>
       </aside>
       <section id="diff-pane">
         <div id="welcome">
