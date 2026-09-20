@@ -27,6 +27,11 @@ export function mountFileTree(container: HTMLElement): TreeHandle {
 		// Workbench density + filterable (diffshub parity: compact rows).
 		density: "compact",
 		search: true,
+		// Our own filter box + the / shortcut drive the search session, so
+		// the built-in box is redundant chrome. Hidden through the supported
+		// unsafeCSS shadow seam — the box carries a data attribute, not a
+		// class (upstream style.js targets [data-file-tree-search-*]).
+		unsafeCSS: "[data-file-tree-search-container]{display:none}",
 	});
 	tree.render({ containerWrapper: container });
 	return {

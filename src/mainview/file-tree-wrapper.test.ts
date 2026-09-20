@@ -149,4 +149,22 @@ describe("mountFileTree (component, jsdom)", () => {
 		tree.destroy();
 		container.remove();
 	});
+
+	test("built-in search box stays hidden while the session filters", async () => {
+		const { container, tree } = mount();
+		tree.setPaths(FIXTURE_PATHS);
+		await flushDom();
+		// Our own filter box drives the session; the component's box must
+		// not render a second one (RON-329).
+		const shadow = shadowRootOf(container);
+		const unsafe = shadow.querySelector("style[data-file-tree-unsafe-css]");
+		expect(unsafe?.textContent).toContain("[data-file-tree-search-container]");
+		// The session itself still works through setSearch.
+		const before = tree.getRowCount();
+		tree.setSearch("Button");
+		await flushDom();
+		expect(tree.getRowCount()).toBeLessThan(before);
+		tree.destroy();
+		container.remove();
+	});
 });

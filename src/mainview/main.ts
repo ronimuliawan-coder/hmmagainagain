@@ -66,6 +66,7 @@ const welcome = byId<HTMLDivElement>("welcome");
 const welcomeRecents = byId<HTMLDivElement>("welcome-recents");
 const welcomeBrowse = byId<HTMLButtonElement>("welcome-browse");
 const diffToolbar = byId<HTMLDivElement>("diff-toolbar");
+const sidebarFooter = byId<HTMLElement>("sidebar-footer");
 const changesCount = byId<HTMLSpanElement>("changes-count");
 const tabButtons = [
 	...document.querySelectorAll<HTMLButtonElement>("#sidebar-tabs [data-tab]"),
@@ -672,6 +673,9 @@ function renderWelcome(root: string): void {
 	welcome.hidden = open;
 	diffToolbar.hidden = !open;
 	diffContainer.hidden = !open;
+	// The commit box is dead chrome with no repo (0 staged, disabled
+	// Commit) — the welcome overlay owns the empty state instead.
+	sidebarFooter.hidden = !open;
 	if (open) return;
 	welcomeRecents.innerHTML = "";
 	for (const recent of readRecents().recents) {
