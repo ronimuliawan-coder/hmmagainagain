@@ -30,7 +30,10 @@
           <button type="button" data-tab="history" role="tab">History</button>
         </div>
         <section id="tab-files" data-tabpane="files" role="tabpanel" aria-label="Worktree files">
-          <input id="tree-filter" placeholder="Filter files  ( / )" aria-label="Filter files" />
+          <div id="tree-tools">
+            <input id="tree-filter" placeholder="Filter files  ( / )" aria-label="Filter files" />
+            <button type="button" id="tree-toggle-btn">Collapse all</button>
+          </div>
           <div id="tree-container"></div>
         </section>
         <section id="tab-changes" data-tabpane="changes" role="tabpanel" aria-label="Changed files" hidden>

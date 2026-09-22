@@ -69,6 +69,7 @@ const browseBtn = byId<HTMLButtonElement>("browse-btn");
 const themeBtn = byId<HTMLButtonElement>("theme-btn");
 const themeStyleBtn = byId<HTMLButtonElement>("theme-style-btn");
 const treeFilter = byId<HTMLInputElement>("tree-filter");
+const treeToggleBtn = byId<HTMLButtonElement>("tree-toggle-btn");
 const welcome = byId<HTMLDivElement>("welcome");
 const welcomeRecents = byId<HTMLDivElement>("welcome-recents");
 const welcomeBrowse = byId<HTMLButtonElement>("welcome-browse");
@@ -361,6 +362,8 @@ async function openRepo(root: string): Promise<void> {
 	tree.setPaths(paths);
 	treeFilter.value = "";
 	tree.setSearch(null);
+	// Fresh tree views start expanded; the toggle owns the state after.
+	setTreeExpanded(true);
 	applyPierreTheme();
 	if (!diffView)
 		diffView = mountDiffView(
@@ -714,10 +717,23 @@ welcomeBrowse.addEventListener("click", () => {
 	}
 });
 
-// ---- Tree filter + global shortcuts ----
+// ---- Tree filter + fold toggle + global shortcuts ----
 // Typing anywhere except a text control: / filters files, 1/2/3 switch tabs.
 treeFilter.addEventListener("input", () => {
 	tree?.setSearch(treeFilter.value.trim() || null);
+});
+
+let treeExpanded = true;
+
+function setTreeExpanded(expanded: boolean): void {
+	treeExpanded = expanded;
+	treeToggleBtn.textContent = expanded ? "Collapse all" : "Expand all";
+	if (expanded) tree?.expandAll();
+	else tree?.collapseAll();
+}
+
+treeToggleBtn.addEventListener("click", () => {
+	setTreeExpanded(!treeExpanded);
 });
 
 document.addEventListener("keydown", (event) => {
@@ -1050,7 +1066,10 @@ function afterWorktreeChange(): Promise<void> {
 			if (!root) return;
 			return getPlatform()
 				.gitWorktreePaths(root)
-				.then((paths) => tree?.setPaths(paths));
+				.then((paths) => {
+					tree?.setPaths(paths);
+					setTreeExpanded(true);
+				});
 		})
 		.then(() => {
 			refreshBranches();

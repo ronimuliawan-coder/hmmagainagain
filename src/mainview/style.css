@@ -312,9 +312,20 @@ textarea {
 	min-height: 0;
 }
 
-#tree-filter {
+#tree-tools {
+	display: flex;
+	gap: 6px;
 	margin-bottom: 8px;
-	width: 100%;
+}
+
+#tree-filter {
+	flex: 1;
+	min-width: 0;
+	width: auto;
+}
+
+#tree-toggle-btn {
+	flex: none;
 }
 
 /* ---- Welcome: left-aligned bench card, max 60ch ---- */
