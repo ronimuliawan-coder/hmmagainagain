@@ -70,12 +70,22 @@ function step(now: number): void {
 }
 
 /** Feeds one wheel delta into the glide; restarts the clock from the live
- * position so successive notches build velocity instead of queuing jumps. */
+ * position so motion stays smooth, but accumulates onto the active target —
+ * targeting from the lagging live position on every notch capped sustained
+ * speed below input rate and felt heavy (RON-381). A reversal starts over
+ * from the live position instead of chasing the old direction. */
 function feed(element: HTMLElement, delta: number): void {
-	const to = Math.min(maxTop(element), Math.max(0, element.scrollTop + delta));
+	const continuing =
+		active !== null &&
+		active.element === element &&
+		(active.to === element.scrollTop ||
+			Math.sign(delta) === Math.sign(active.to - element.scrollTop));
+	if (!continuing) stopGlide();
+	const base =
+		active && active.element === element ? active.to : element.scrollTop;
+	const to = Math.min(maxTop(element), Math.max(0, base + delta));
 	// At a scroll edge with nowhere to go, leave the event native (bounce).
 	if (to === element.scrollTop && !active) return;
-	if (active && active.element !== element) stopGlide();
 	const from = element.scrollTop;
 	if (active) cancelAnimationFrame(active.frame);
 	active = {

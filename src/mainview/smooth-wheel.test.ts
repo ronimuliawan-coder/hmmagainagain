@@ -111,4 +111,26 @@ describe("enableSmoothWheel", () => {
 		expect(box.scrollTop).toBe(0);
 		box.remove();
 	});
+
+	test("accumulates rapid notches onto the active target", async () => {
+		const box = scrollBox();
+		const child = box.firstElementChild as HTMLElement;
+		wheel(child, { deltaY: 100 });
+		wheel(child, { deltaY: 100 });
+		await settle();
+		// Second notch builds on the first target (200), not the lagging
+		// live position — sustained input must not velocity-cap (RON-381).
+		expect(box.scrollTop).toBe(200);
+		box.remove();
+	});
+
+	test("a reversal starts over from the live position", async () => {
+		const box = scrollBox();
+		const child = box.firstElementChild as HTMLElement;
+		wheel(child, { deltaY: 100 });
+		wheel(child, { deltaY: -100 });
+		await settle();
+		expect(box.scrollTop).toBe(0);
+		box.remove();
+	});
 });
