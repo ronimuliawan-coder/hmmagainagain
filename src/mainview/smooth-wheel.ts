@@ -10,7 +10,9 @@
 // so shadow-DOM scrollers (file tree) just work.
 
 const LINE_PX = 16;
-const GLIDE_MS = 140;
+/** Glide length. 140ms felt heavy/trailing on hardware (RON-381) — 90ms
+ * tracks the wheel without losing the smoothing. */
+const GLIDE_MS = 90;
 /** Pixel detents at or above this are a mouse notch, not a touchpad. */
 const NOTCH_PX = 50;
 
