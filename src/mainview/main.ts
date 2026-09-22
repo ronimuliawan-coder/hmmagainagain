@@ -22,6 +22,7 @@ import {
 	isElectrobun,
 	sendSelfTestResult,
 } from "./platform";
+import { enableSmoothWheel } from "./smooth-wheel";
 import { staticTheme } from "./static-themes";
 import { renderStatusList } from "./status-list";
 import { createStore } from "./store";
@@ -34,6 +35,10 @@ import {
 	themeVariantLabel,
 	themeVariantTitle,
 } from "./theme-names";
+
+// Mouse-wheel input arrives notched; WebKit applies it as instant jumps.
+// Glide it instead (touchpads, pinch-zoom, and reduced-motion stay native).
+enableSmoothWheel();
 
 // U8b cold-start proxy: first compositor frame in the webview, on the shared
 // Date.now wall clock. Surfaces in main-process output only if Electrobun
