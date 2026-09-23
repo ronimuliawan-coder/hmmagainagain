@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import electrobunConfig from "../../electrobun.config";
 
 describe("electrobun.config", () => {
-	test("main process runs on Cottontail (ADR-0002, RON-315)", () => {
-		expect(electrobunConfig.build.mainProcess).toBe("cottontail");
+	test("main process stays on Bun until the toolchain heals (ADR-0002)", () => {
+		expect(electrobunConfig.build.mainProcess).toBe("bun");
 	});
 
 	test("app identity is hmmagainagain", () => {
