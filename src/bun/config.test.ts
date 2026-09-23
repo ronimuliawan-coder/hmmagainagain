@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import electrobunConfig from "../../electrobun.config";
 
 describe("electrobun.config", () => {
-	test("main process runs on Bun (ADR-0001 C2)", () => {
+	test("main process stays on Bun until the toolchain heals (ADR-0002)", () => {
 		expect(electrobunConfig.build.mainProcess).toBe("bun");
 	});
 

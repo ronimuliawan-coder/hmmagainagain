@@ -3,7 +3,16 @@
 // spawn per object. Requests are serialized — the batch protocol allows
 // pipelining, but strict ordering keeps the reader trivially correct.
 
-import { type FileSink, spawn } from "bun";
+import { spawn } from "bun";
+
+/** Minimal stdin-sink surface shared by Bun's FileSink and Cottontail's
+ * ProcessWritable. FileSink is absent under Cottontail (RON-315), so the
+ * session depends on this structural shape instead of either brand. */
+interface StdinSink {
+	write(chunk: string | Uint8Array): void;
+	flush(): void;
+	end(): void;
+}
 
 // Deliberate exception to the "spawnGit is the only spawner" invariant:
 // the batch protocol needs one LONG-LIVED process with an interactive
@@ -32,7 +41,7 @@ export class CatFileSession {
 	private queue: PendingRequest[] = [];
 	private closed = false;
 
-	private stdinSink: FileSink | null;
+	private stdinSink: StdinSink | null;
 
 	private constructor(proc: ReturnType<typeof spawn>) {
 		this.proc = proc;
