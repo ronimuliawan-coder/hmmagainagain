@@ -58,7 +58,7 @@ export interface GitDiffOptions {
  * `readRepo`, which validates it.
  */
 export interface Platform {
-	readonly kind: "fake" | "bun" | "rpc";
+	readonly kind: "fake" | "bun" | "rpc" | "tauri";
 	/** Validates the path is a git worktree; rejects (throws) otherwise. */
 	readRepo(root: string): Promise<RepoInfo>;
 	/** Native folder picker; resolves null when the user cancels. The fake

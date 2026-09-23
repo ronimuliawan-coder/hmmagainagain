@@ -17,6 +17,7 @@ import type {
 	RepoInfo,
 } from "../shared/platform";
 import { buildFakeFixture } from "../shared/platform-fake";
+import { createTauriPlatform, isTauri } from "./platform-tauri";
 
 export const isElectrobun = (): boolean =>
 	typeof window !== "undefined" &&
@@ -520,8 +521,10 @@ export function getPlatformLoadError(): string | null {
 	return platformLoadError;
 }
 
-/** The single Platform instance the UI consumes; fake when not in Electrobun. */
+/** The single Platform instance the UI consumes: Electrobun RPC first,
+ * then Tauri invoke (M1), then the fake fallback for plain browsers. */
 export function getPlatform(): Platform {
 	if (rpcPlatform) return rpcPlatform;
+	if (isTauri()) return createTauriPlatform();
 	return buildFakeFixture().platform;
 }
