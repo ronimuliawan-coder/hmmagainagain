@@ -5,3 +5,7 @@ build/
 dist/
 artifacts/
 *.tsbuildinfo
+
+# Tauri sidecar (M0)
+tauri/target/
+tauri/src-tauri/gen/
