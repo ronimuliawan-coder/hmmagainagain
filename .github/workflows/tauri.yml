@@ -48,25 +48,24 @@ jobs:
           cache-dependency-path: tauri/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Verify Rust toolchain on PATH
-        # dtolnay only exports CARGO_HOME/bin when it installs rustup
-        # itself; on images with preinstalled rustup the export is skipped
-        # and cargo is missing downstream (M0 CI failure). Make it loud.
-        run: |
-          RUSTUP_BIN="$(dirname "$(command -v rustup)")"
-          echo "$RUSTUP_BIN" >> "$GITHUB_PATH"
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          export PATH="$RUSTUP_BIN:$HOME/.cargo/bin:$PATH"
-          which cargo rustc
-          cargo --version
-          rustc --version
-
       - name: Cache cargo
+        # BEFORE the toolchain install below: this step bind-mounts the
+        # cache volume over ~/.cargo, which would shadow a just-installed
+        # toolchain for every later step (M0 CI failure). Mount first,
+        # install into the mount.
         uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1
         with:
           path: |
             ~/.cargo
             tauri/src-tauri/target
+
+      - name: Install Rust toolchain into the cache mount
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          which cargo rustc
+          cargo --version
+          rustc --version
 
       - name: Install system webview headers
         run: |
