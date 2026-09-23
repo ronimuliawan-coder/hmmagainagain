@@ -48,21 +48,18 @@ jobs:
           cache-dependency-path: tauri/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache cargo
-        # BEFORE the toolchain install below: this step bind-mounts the
-        # cache volume over ~/.cargo, which would shadow a just-installed
-        # toolchain for every later step (M0 CI failure). Mount first,
-        # install into the mount.
+      - name: Cache cargo build artifacts
+        # NOTE: never cache ~/.cargo itself — the mount shadows the
+        # just-installed toolchain (rustup + cargo vanish for later steps).
+        # Cache only the registry downloads and the build tree.
         uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1
         with:
           path: |
-            ~/.cargo
+            ~/.cargo/registry
             tauri/src-tauri/target
 
-      - name: Install Rust toolchain into the cache mount
+      - name: Verify Rust toolchain
         run: |
-          rustup toolchain install stable --profile minimal --no-self-update
-          rustup default stable
           which cargo rustc
           cargo --version
           rustc --version
