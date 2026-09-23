@@ -1,3 +1,4 @@
+// @hutch cottontail=0.6.0
 export default {
 	scripts: {
 		install: ["hutch", "install", "--frozen-lockfile"],

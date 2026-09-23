@@ -7,8 +7,12 @@ export default {
 		version: "0.0.1",
 	},
 	build: {
-		mainProcess: "bun",
-		bun: {
+		// Main process on Cottontail (RON-315, ADR-0002): the Bun runtime is
+		// 97% of the installer payload. Shipped main code stays importable
+		// under both runtimes (compatible subset only); revert this block
+		// to roll back.
+		mainProcess: "cottontail",
+		cottontail: {
 			entrypoint: "src/bun/index.ts",
 		},
 		copy: {
