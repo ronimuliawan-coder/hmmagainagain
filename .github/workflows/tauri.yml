@@ -1,0 +1,91 @@
+# Tauri sidecar CI (RON-397 M0): Linux release bundle for tauri/, path-gated
+# so product CI stays fast. Same Namespace runner shape as product.yml.
+# Ubuntu-only (Windows/macOS arrive in M5).
+
+name: tauri
+
+on:
+  push:
+    branches: ["migration/**", "feat/**", "fix/**", "docs/**", "chore/**"]
+    paths:
+      - "tauri/**"
+      - ".github/workflows/tauri.yml"
+  pull_request:
+    paths:
+      - "tauri/**"
+      - ".github/workflows/tauri.yml"
+
+concurrency:
+  group: tauri-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  bundle-linux:
+    name: bundle Linux release
+    runs-on:
+      - nscloud-ubuntu-24.04-amd64-4x8-with-cache
+      - nscloud-cache-size-20gb
+      - nscloud-cache-tag-hmmagainagain-tauri
+      - nscloud-git-mirror-5gb
+      - nscloud-runner-tool-cache-20gb
+    permissions:
+      contents: read
+    steps:
+      - name: Check out (cached mirror)
+        uses: namespacelabs/nscloud-checkout-action@def520b6c21233362f09c9ceda4352c51cceca26 # v8
+        with:
+          persist-credentials: false
+
+      - name: Set up Node + Rust
+        # Tags, not SHAs: SHAs unverifiable from here; pin them on first
+        # green CI review (M0 follow-up).
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: tauri/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build artifacts
+        # NOTE: never cache ~/.cargo itself — the mount shadows the
+        # just-installed toolchain (rustup + cargo vanish for later steps).
+        # Cache only the registry downloads and the build tree.
+        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1
+        with:
+          path: |
+            ~/.cargo/registry
+            tauri/src-tauri/target
+
+      - name: Verify Rust toolchain
+        run: |
+          which cargo rustc
+          cargo --version
+          rustc --version
+
+      - name: Install system webview headers
+        run: |
+          dpkg -s libwebkit2gtk-4.1-dev >/dev/null 2>&1 || {
+            sudo apt-get update -qq
+            sudo apt-get install -qy libwebkit2gtk-4.1-dev
+          }
+
+      - name: Install frontend dependencies
+        working-directory: tauri
+        run: npm ci
+
+      - name: Build bundle
+        working-directory: tauri
+        run: npx tauri build
+
+      - name: Report bundle
+        run: |
+          bundle="$(ls tauri/src-tauri/target/release/bundle/*/hmmagainagain* 2>/dev/null | head -1)"
+          if [ -n "$bundle" ]; then
+            bytes="$(stat -c %s "$bundle")"
+            echo "bundle=$bundle bytes=$bytes ($(awk "BEGIN {printf \"%.1f\", $bytes/1024/1024}") MiB)"
+          else
+            echo "no bundle artifact found"
+            exit 1
+          fi
