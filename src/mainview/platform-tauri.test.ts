@@ -8,12 +8,12 @@ import { createTauriPlatform, isTauri } from "./platform-tauri";
 const calls: { command: string; args?: Record<string, unknown> }[] = [];
 let remoteFail = false;
 
-const PORCELAIN =
-	[
-		"# branch.oid abc123",
-		"# branch.head main",
-		"1 M. N... 100644 100644 100644 abc def f.txt",
-	].join("\0") + "\0";
+const PORCELAIN_LINES = [
+	"# branch.oid abc123",
+	"# branch.head main",
+	"1 M. N... 100644 100644 100644 abc def f.txt",
+];
+const PORCELAIN = `${PORCELAIN_LINES.join("\0")}\0`;
 
 const PATCH = [
 	"diff --git a/f.txt b/f.txt",

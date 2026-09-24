@@ -196,27 +196,10 @@ jobs:
         run: npx tauri build
 
       - name: Report bundle
-        # node, not shell globs: this step must run unchanged on pwsh.
+        # Script file, not `node -e`: PowerShell mangles inline backticks
+        # and quotes (proven red). Same file on macOS for uniformity.
         working-directory: tauri
-        run: >-
-          node --input-type=module -e "
-          import { readdirSync, statSync, existsSync } from 'node:fs';
-          import { join } from 'node:path';
-          const root = 'src-tauri/target/release/bundle';
-          const found = [];
-          const walk = (dir) => {
-            for (const entry of readdirSync(dir, { withFileTypes: true })) {
-              const full = join(dir, entry.name);
-              if (entry.isDirectory()) walk(full);
-              else if (/hmmagainagain/i.test(entry.name)) found.push(full);
-            }
-          };
-          if (existsSync(root)) walk(root);
-          if (!found.length) { console.error('no bundle artifact found'); process.exit(1); }
-          for (const f of found) {
-            const bytes = statSync(f).size;
-            console.log(`bundle=${f} bytes=${bytes} (${(bytes / 1024 / 1024).toFixed(1)} MiB)`);
-          }"
+        run: node harness/report-bundle.mjs
 
   bundle-macos:
     name: bundle macOS release
@@ -273,22 +256,4 @@ jobs:
 
       - name: Report bundle
         working-directory: tauri
-        run: >-
-          node --input-type=module -e "
-          import { readdirSync, statSync, existsSync } from 'node:fs';
-          import { join } from 'node:path';
-          const root = 'src-tauri/target/release/bundle';
-          const found = [];
-          const walk = (dir) => {
-            for (const entry of readdirSync(dir, { withFileTypes: true })) {
-              const full = join(dir, entry.name);
-              if (entry.isDirectory()) walk(full);
-              else if (/hmmagainagain/i.test(entry.name)) found.push(full);
-            }
-          };
-          if (existsSync(root)) walk(root);
-          if (!found.length) { console.error('no bundle artifact found'); process.exit(1); }
-          for (const f of found) {
-            const bytes = statSync(f).size;
-            console.log(`bundle=${f} bytes=${bytes} (${(bytes / 1024 / 1024).toFixed(1)} MiB)`);
-          }"
+        run: node harness/report-bundle.mjs
