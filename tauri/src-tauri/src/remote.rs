@@ -120,8 +120,13 @@ pub async fn git_remote_start(
 			.current_dir(&spawn_root)
 			// Never inherit the terminal: like the Bun adapter (piped
 			// stdin, closed), a credential prompt must fail fast instead
-			// of hanging the transfer uninterruptibly.
+			// of hanging the transfer uninterruptibly. Empty askpass
+			// fallbacks close the GUI-prompt hole too (git skips empty
+			// values); credential.helper configs and SSH-agent auth,
+			// which need no prompt, keep working.
 			.env("GIT_TERMINAL_PROMPT", "0")
+			.env("GIT_ASKPASS", "")
+			.env("SSH_ASKPASS", "")
 			.stdin(std::process::Stdio::null())
 			.stdout(std::process::Stdio::null())
 			.stderr(std::process::Stdio::piped());
@@ -186,7 +191,27 @@ pub async fn git_remote_result(
 		let mut chunk = [0u8; 4096];
 		loop {
 			use std::io::Read;
-			let n = stderr.read(&mut chunk).map_err(|e| format!("read: {e}"))?;
+			let n = match stderr.read(&mut chunk) {
+				Ok(n) => n,
+				Err(e) => {
+					// A dead pipe must not strand the run: the frontend
+					// rejects without calling abort, so remove the entry
+					// and reap the child here (later results would only
+					// see a consumed stderr handle).
+					if let Some(mut run) = registry()
+						.lock()
+						.map_err(|lock_error| {
+							format!("lock: {lock_error}")
+						})?
+						.runs
+						.remove(&op_id)
+					{
+						let _ = run.child.kill();
+						let _ = run.child.wait();
+					}
+					return Err(format!("read: {e}"));
+				}
+			};
 			if n == 0 {
 				break;
 			}
