@@ -87,6 +87,8 @@ pub async fn read_repo(root: String) -> Result<RepoInfo, String> {
 
 #[tauri::command]
 pub async fn git_status(root: String) -> Result<String, String> {
+	// -uall matches the Bun adapter: nested untracked files report
+	// individually (nested/file.txt), not as a collapsed directory.
 	run_git_async(
 		root,
 		vec![
@@ -94,6 +96,7 @@ pub async fn git_status(root: String) -> Result<String, String> {
 			"--porcelain=v2".to_string(),
 			"--branch".to_string(),
 			"-z".to_string(),
+			"-uall".to_string(),
 		],
 	)
 	.await
@@ -257,6 +260,8 @@ mod tests {
 		assert!(git(&["add", "."]).status.success());
 		assert!(git(&["commit", "-m", "init"]).status.success());
 		std::fs::write(dir.join("f.txt"), "one\ntwo\n").unwrap();
+		std::fs::create_dir_all(dir.join("nested")).unwrap();
+		std::fs::write(dir.join("nested").join("file.txt"), "new\n").unwrap();
 		dir
 	}
 
@@ -306,6 +311,9 @@ mod tests {
 		let root = dir.to_str().unwrap().to_string();
 		let status = git_status(root.clone()).await.unwrap();
 		assert!(status.contains(".M") && status.contains("f.txt"), "{status}");
+		// -uall: nested untracked files report individually, never as a
+		// collapsed directory entry the Changes view can't stage.
+		assert!(status.contains("nested/file.txt"), "{status}");
 		let paths = git_worktree_paths(root.clone()).await.unwrap();
 		assert!(paths.split('\0').any(|p| p == "f.txt"), "{paths}");
 		let id = git_diff_start(root, false, None, None).await.unwrap();
