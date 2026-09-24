@@ -41,7 +41,7 @@ jobs:
             echo "run-ci=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          count="$(curl -fsSL -G \
+          count="$(curl -fsSL --max-time 30 -G \
             --data-urlencode "head=${GITHUB_REPOSITORY_OWNER}:${GITHUB_REF_NAME}" \
             --data-urlencode "state=open" \
             -H "Authorization: Bearer $GH_TOKEN" \
@@ -69,9 +69,14 @@ jobs:
       - nscloud-cache-size-20gb
       - nscloud-cache-tag-hmmagainagain-tauri
       # Without an allow-commit label the volume never writes back, so
-      # every run recompiles all crates cold. migration/tauri is where
-      # every tauri/ change lands; feature branches read that warmth.
+      # every run recompiles all crates cold. The volume warms from push
+      # runs on these branches (PR runs read it); per-PR write-back is
+      # impossible with static branch labels, and unnecessary — the
+      # dependency set changes rarely, so a merge-committed volume stays
+      # warm for subsequent PRs.
       - nscloud-cache-allow-commit-from-migration/tauri
+      - nscloud-cache-allow-commit-from-dev
+      - nscloud-cache-allow-commit-from-master
       - nscloud-git-mirror-5gb
       - nscloud-runner-tool-cache-20gb
     permissions:
