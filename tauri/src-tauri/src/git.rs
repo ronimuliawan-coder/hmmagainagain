@@ -49,12 +49,22 @@ fn reject_dash(value: &Option<String>, what: &str) -> Result<(), String> {
 	Ok(())
 }
 
-/// Canonical lane key for a repository root: symlinked or `..`-laden
-/// spellings of the same repo must serialize on one lane. Falls back to
-/// the raw string when the path does not (yet) exist; git itself then
-/// reports the real error. Only the lane key is canonicalised — git
-/// always receives the original root.
+/// Canonical lane key for a repository root. A subdirectory of a repo must
+/// serialize on the same lane as the root (git discovers the same index
+/// from both), so the key resolves the worktree top-level first. Falls back
+/// to the canonicalized path, then the raw string when the path does not
+/// (yet) exist; git itself then reports the real error. Only the lane key
+/// is resolved — git always receives the original root.
 fn lane_key(root: &str) -> String {
+	if let Ok(output) = Command::new("git")
+		.args(["rev-parse", "--show-toplevel"])
+		.current_dir(root)
+		.output()
+	{
+		if output.status.success() {
+			return String::from_utf8_lossy(&output.stdout).trim().to_string();
+		}
+	}
 	std::fs::canonicalize(root)
 		.map(|p| p.to_string_lossy().into_owned())
 		.unwrap_or_else(|_| root.to_string())
@@ -1056,6 +1066,33 @@ mod tests {
 			lane_key("/no/such/dir-ever"),
 			"/no/such/dir-ever".to_string()
 		);
+	}
+
+	#[test]
+	fn lane_key_unifies_subdirectories() {
+		// A subdirectory resolves to the same worktree lane as the root.
+		let base = std::env::temp_dir().join(format!(
+			"tauri-lane-fixture-{}",
+			std::time::SystemTime::now()
+				.duration_since(std::time::UNIX_EPOCH)
+				.map(|d| d.as_nanos())
+				.unwrap_or(0)
+		));
+		std::fs::create_dir_all(base.join("sub")).unwrap();
+		let git = |args: &[&str], dir: &std::path::Path| {
+			Command::new("git")
+				.args(args)
+				.current_dir(dir)
+				.env("GIT_CONFIG_NOSYSTEM", "1")
+				.output()
+				.unwrap()
+		};
+		assert!(git(&["init", "-b", "main"], &base).status.success());
+		assert_eq!(
+			lane_key(base.to_str().unwrap()),
+			lane_key(base.join("sub").to_str().unwrap())
+		);
+		let _ = std::fs::remove_dir_all(&base);
 	}
 
 	#[tokio::test]
