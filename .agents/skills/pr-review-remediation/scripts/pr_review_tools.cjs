@@ -385,7 +385,7 @@ switch (command) {
 	case "fetch": {
 		const prNumber = parseInt(args[0], 10);
 		if (!prNumber) {
-			console.error("Usage: pr_review_tools.js fetch <pr_number>");
+			console.error("Usage: pr_review_tools.cjs fetch <pr_number>");
 			process.exit(1);
 		}
 		const data = fetchPRReviewData(prNumber);
@@ -398,7 +398,7 @@ switch (command) {
 		const message = args.slice(2).join(" ");
 		if (!prNumber || !commentId || !message) {
 			console.error(
-				"Usage: pr_review_tools.js reply <pr_number> <comment_id> <message>",
+				"Usage: pr_review_tools.cjs reply <pr_number> <comment_id> <message>",
 			);
 			process.exit(1);
 		}
@@ -408,7 +408,7 @@ switch (command) {
 	case "resolve": {
 		const threadId = args[0];
 		if (!threadId) {
-			console.error("Usage: pr_review_tools.js resolve <thread_id>");
+			console.error("Usage: pr_review_tools.cjs resolve <thread_id>");
 			process.exit(1);
 		}
 		resolveThread(threadId);
@@ -417,7 +417,7 @@ switch (command) {
 	case "unresolve": {
 		const threadId = args[0];
 		if (!threadId) {
-			console.error("Usage: pr_review_tools.js unresolve <thread_id>");
+			console.error("Usage: pr_review_tools.cjs unresolve <thread_id>");
 			process.exit(1);
 		}
 		unresolveThread(threadId);
@@ -425,6 +425,6 @@ switch (command) {
 	}
 	default:
 		console.log(
-			"Usage: pr_review_tools.js [repo | suites <commit_sha> | fetch <pr_number> | reply <pr_number> <comment_id> <msg> | resolve <thread_id> | unresolve <thread_id>]",
+			"Usage: pr_review_tools.cjs [repo | suites <commit_sha> | fetch <pr_number> | reply <pr_number> <comment_id> <msg> | resolve <thread_id> | unresolve <thread_id>]",
 		);
 }
