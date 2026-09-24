@@ -16,7 +16,7 @@ use std::sync::{Mutex, OnceLock};
 use tauri::Emitter;
 
 fn run_git(root: &str, args: &[&str]) -> Result<String, String> {
-	let output = Command::new("git")
+	let output = git_command()
 		.args(args)
 		.current_dir(root)
 		.output()
@@ -41,6 +41,7 @@ async fn run_git_async(root: String, args: Vec<String>) -> Result<String, String
 	.map_err(|e| format!("worker: {e}"))?
 }
 
+/// Rejects leading-dash values that would parse as flags (CWE-88).
 fn reject_dash(value: &Option<String>, what: &str) -> Result<(), String> {
 	if value.as_deref().is_some_and(|v| v.starts_with('-')) {
 		return Err(format!("invalid {what}: must not start with '-': {value:?}"));
@@ -48,6 +49,144 @@ fn reject_dash(value: &Option<String>, what: &str) -> Result<(), String> {
 	Ok(())
 }
 
+/// Every git child process in this file is built here. Location variables
+/// inherited from the app's own environment would redirect git at a
+/// different repository, index, or object store than `root` — writes could
+/// land in the wrong repo, or blobs could be stored where a later git
+/// cannot find them. They are always removed; callers pass locations
+/// explicitly via argv/cwd.
+fn git_command() -> Command {
+	let mut command = Command::new("git");
+	command
+		.env_remove("GIT_DIR")
+		.env_remove("GIT_WORK_TREE")
+		.env_remove("GIT_INDEX_FILE")
+		.env_remove("GIT_OBJECT_DIRECTORY")
+		.env_remove("GIT_COMMON_DIR");
+	command
+}
+
+/// Canonical lane key for a repository root. A subdirectory of a repo must
+/// serialize on the same lane as the root (git discovers the same index
+/// from both), so the key resolves the worktree top-level first. Falls back
+/// to the canonicalized path, then the raw string when the path does not
+/// (yet) exist; git itself then reports the real error. Only the lane key
+/// is resolved — git always receives the original root.
+fn lane_key(root: &str) -> String {
+	if let Ok(output) = git_command()
+		.args(["rev-parse", "--show-toplevel"])
+		.current_dir(root)
+		.output()
+	{
+		if output.status.success() {
+			return String::from_utf8_lossy(&output.stdout).trim().to_string();
+		}
+	}
+	std::fs::canonicalize(root)
+		.map(|p| p.to_string_lossy().into_owned())
+		.unwrap_or_else(|_| root.to_string())
+}
+
+// ---- Serialized index writes (per-repo lanes) ----
+//
+// Mirrors the Bun adapter's write queue: every mutation of a repository
+// runs under that repo's lane so concurrent UI actions cannot interleave
+// index writes. The lane lives only for the blocking section (never held
+// across .await); a poisoned lane recovers instead of wedging the repo.
+
+/// Per-repository write lanes, created on demand.
+fn write_queues() -> &'static Mutex<HashMap<String, std::sync::Arc<Mutex<()>>>> {
+	static QUEUES: OnceLock<Mutex<HashMap<String, std::sync::Arc<Mutex<()>>>>> =
+		OnceLock::new();
+	QUEUES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Runs `op` with the repo's write lane held, on the blocking pool.
+async fn with_write_lock<F, T>(root: String, op: F) -> Result<T, String>
+where
+	F: FnOnce() -> Result<T, String> + Send + 'static,
+	T: Send + 'static,
+{
+	let lane = {
+		let mut queues = write_queues()
+			.lock()
+			.map_err(|e| format!("lock: {e}"))?;
+		let lane = queues
+			.entry(lane_key(&root))
+			.or_insert_with(|| std::sync::Arc::new(Mutex::new(())))
+			.clone();
+		// Cap idle lanes so opening many repositories never grows the map
+		// without bound. Eviction is race-free: it runs under the map lock,
+		// and an entry is dropped only when strong_count is 1 (the map is
+		// the sole holder — no op holds or is about to hold it, since
+		// cloning also happens under this lock).
+		if queues.len() > 64 {
+			queues.retain(|_, lane| std::sync::Arc::strong_count(lane) > 1);
+		}
+		lane
+	};
+	tauri::async_runtime::spawn_blocking(move || {
+		let _held = lane.lock().unwrap_or_else(|e| e.into_inner());
+		op()
+	})
+	.await
+	.map_err(|e| format!("worker: {e}"))?
+}
+
+/// One-shot write: argv + optional stdin, stdout/stderr collected.
+/// Failures carry stderr verbatim (hook output, "patch does not apply")
+/// because the UI displays it as-is.
+fn run_write(root: &str, args: &[&str], stdin: Option<&str>) -> Result<(), String> {
+	run_write_env(root, args, stdin, &[])
+}
+
+/// run_write plus extra environment variables for the child.
+fn run_write_env(
+	root: &str,
+	args: &[&str],
+	stdin: Option<&str>,
+	extra_env: &[(&str, &str)],
+) -> Result<(), String> {
+	let mut child = git_command();
+	child
+		.args(args)
+		.current_dir(root)
+		.stdin(if stdin.is_some() {
+			std::process::Stdio::piped()
+		} else {
+			std::process::Stdio::null()
+		})
+		.stdout(std::process::Stdio::piped())
+		.stderr(std::process::Stdio::piped());
+	for (key, value) in extra_env {
+		child.env(key, value);
+	}
+	let mut child = child.spawn().map_err(|e| format!("spawn: {e}"))?;
+	if let Some(text) = stdin {
+		use std::io::Write;
+		child
+			.stdin
+			.as_mut()
+			.ok_or("stdin unavailable")?
+			.write_all(text.as_bytes())
+			.map_err(|e| format!("stdin: {e}"))?;
+		// Explicit close (then drop): commands waiting on stdin see EOF.
+		child.stdin.take();
+	}
+	let output = child
+		.wait_with_output()
+		.map_err(|e| format!("wait: {e}"))?;
+	if !output.status.success() {
+		return Err(format!(
+			"git {} failed: {}",
+			args[0],
+			String::from_utf8_lossy(&output.stderr)
+		));
+	}
+	Ok(())
+}
+
+/// Diff argv contract mirroring the Bun adapter (ranges + --no-color).
 fn diff_argv(staged: bool, from: &Option<String>, to: &Option<String>) -> Vec<String> {
 	// Mirrors the Bun adapter's ranges plus --no-color (a forced color
 	// config would otherwise poison the patch with escape sequences).
@@ -124,6 +263,7 @@ struct DiffRegistry {
 	children: HashMap<u64, Child>,
 }
 
+/// Live diff runs for the start/abort/result protocol.
 fn registry() -> &'static Mutex<DiffRegistry> {
 	static REGISTRY: OnceLock<Mutex<DiffRegistry>> = OnceLock::new();
 	REGISTRY.get_or_init(|| {
@@ -145,7 +285,7 @@ pub async fn git_diff_start(
 	reject_dash(&to, "to ref")?;
 	let argv = diff_argv(staged, &from, &to);
 	let child = tauri::async_runtime::spawn_blocking(move || {
-		Command::new("git")
+		git_command()
 			.args(&argv)
 			.current_dir(&root)
 			.stdout(std::process::Stdio::piped())
@@ -282,7 +422,7 @@ pub async fn git_log_stream(
 	let emit_app = app.clone();
 	let done_id = run_id.clone();
 	let (count, status) = tauri::async_runtime::spawn_blocking(move || {
-		let mut child = Command::new("git")
+		let mut child = git_command()
 			.args(&argv)
 			.current_dir(&root)
 			.stdout(std::process::Stdio::piped())
@@ -372,6 +512,7 @@ pub struct LogCommit {
 	refs: String,
 }
 
+/// Parses one NUL-terminated log record (US-separated fields).
 pub fn parse_log_record(record: &str) -> Option<LogCommit> {
 	// read_until keeps the NUL terminator: strip it here so refs never
 	// ends in "\0" (truthy in JS, breaks empty-ref checks downstream).
@@ -397,6 +538,7 @@ pub struct BranchInfo {
 	upstream: Option<String>,
 }
 
+/// Parses one for-each-ref record (NUL-separated fields).
 pub fn parse_branch_line(line: &str) -> Option<BranchInfo> {
 	let mut fields = line.split('\0');
 	let oid = fields.next()?.to_string();
@@ -446,30 +588,23 @@ pub async fn git_branches(root: String) -> Result<Vec<BranchInfo>, String> {
 
 /// Refuses when the worktree or index holds ANY change — nothing is stashed,
 /// nothing is discarded (mirrors the Bun adapter's safety centerpiece).
-async fn assert_clean_worktree(root: &str) -> Result<(), String> {
-	let raw = run_git_async(
-		root.to_string(),
-		vec![
-			"status".to_string(),
-			"--porcelain=v2".to_string(),
-			"-z".to_string(),
-			"-uall".to_string(),
-		],
-	)
-	.await?;
-	if status_has_entries(&raw) {
-		let count = raw
-			.split('\0')
-			.filter(|r| !r.is_empty())
-			.filter(|r| matches!(r.chars().next(), Some('1' | '2' | 'u' | '?')))
-			.count();
-		return Err(format!(
-			"refusing to switch branches: the worktree has {count} change(s) (commit them first — nothing is auto-discarded)"
-		));
+/// Synchronous: runs inside a held write lane.
+fn assert_clean_worktree_sync(root: &str) -> Result<(), String> {
+	let raw = run_git(root, &["status", "--porcelain=v2", "-z", "-uall"])?;
+	if !status_has_entries(&raw) {
+		return Ok(());
 	}
-	Ok(())
+	let count = raw
+		.split('\0')
+		.filter(|r| !r.is_empty())
+		.filter(|r| matches!(r.chars().next(), Some('1' | '2' | 'u' | '?')))
+		.count();
+	Err(format!(
+		"refusing to switch branches: the worktree has {count} change(s) (commit them first — nothing is auto-discarded)"
+	))
 }
 
+/// Rejects blank or leading-dash names before argv construction.
 fn reject_empty(value: &str, what: &str) -> Result<(), String> {
 	if value.trim().is_empty() {
 		return Err(format!("{what} is empty"));
@@ -489,30 +624,82 @@ pub async fn git_create_branch(
 	switch_to: bool,
 ) -> Result<(), String> {
 	reject_empty(&name, "branch name")?;
-	// NOTE (M3): the Bun adapter serializes branch writes through the
-	// per-repo write queue; the check-then-act above races under
-	// concurrency until M3 ports the queue and absorbs these ops.
-	if switch_to {
-		assert_clean_worktree(&root).await?;
-		run_git_async(root, vec!["switch".to_string(), "-c".to_string(), name]).await?;
-	} else {
-		run_git_async(root, vec!["branch".to_string(), name]).await?;
-	}
-	Ok(())
+	with_write_lock(root.clone(), move || {
+		if switch_to {
+			assert_clean_worktree_sync(&root)?;
+			run_write(&root, &["switch", "-c", &name], None)
+		} else {
+			run_write(&root, &["branch", &name], None)
+		}
+	})
+	.await
 }
 
 #[tauri::command]
 pub async fn git_switch_branch(root: String, name: String) -> Result<(), String> {
 	reject_empty(&name, "branch name")?;
-	assert_clean_worktree(&root).await?;
-	run_git_async(root, vec!["switch".to_string(), name]).await?;
-	Ok(())
+	with_write_lock(root.clone(), move || {
+		assert_clean_worktree_sync(&root)?;
+		run_write(&root, &["switch", &name], None)
+	})
+	.await
+}
+
+#[tauri::command]
+pub async fn stage_paths(root: String, paths: Vec<String>) -> Result<(), String> {
+	if paths.is_empty() {
+		return Ok(());
+	}
+	with_write_lock(root.clone(), move || {
+		let mut args = vec!["add", "-A", "--"];
+		args.extend(paths.iter().map(String::as_str));
+		// Literal pathspecs: a file like app/[id]/page.tsx must not
+		// stage its glob lookalikes (review catch; Bun twin tracked
+		// separately).
+		run_write_env(&root, &args, None, &[("GIT_LITERAL_PATHSPECS", "1")])
+	})
+	.await
+}
+
+#[tauri::command]
+pub async fn unstage_paths(root: String, paths: Vec<String>) -> Result<(), String> {
+	if paths.is_empty() {
+		return Ok(());
+	}
+	with_write_lock(root.clone(), move || {
+		let mut args = vec!["restore", "--staged", "--"];
+		args.extend(paths.iter().map(String::as_str));
+		run_write_env(&root, &args, None, &[("GIT_LITERAL_PATHSPECS", "1")])
+	})
+	.await
+}
+
+#[tauri::command]
+pub async fn apply_index_patch(root: String, patch: String) -> Result<(), String> {
+	if patch.trim().is_empty() {
+		return Ok(());
+	}
+	with_write_lock(root.clone(), move || {
+		// The patch goes in via stdin; `-` reads it. A patch whose context
+		// no longer matches fails here with git's own message.
+		run_write(
+			&root,
+			&["apply", "--cached", "--whitespace=nowarn", "-"],
+			Some(&patch),
+		)
+	})
+	.await
+}
+
+#[tauri::command]
+pub async fn commit(root: String, message: String) -> Result<(), String> {
+	with_write_lock(root.clone(), move || run_write(&root, &["commit", "-m", &message], None))
+		.await
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use std::process::Command;
 
 	fn fixture() -> std::path::PathBuf {
 		let dir = std::env::temp_dir().join(format!(
@@ -524,7 +711,7 @@ mod tests {
 		));
 		std::fs::create_dir_all(&dir).unwrap();
 		let git = |args: &[&str]| {
-			Command::new("git")
+			git_command()
 				.args(args)
 				.current_dir(&dir)
 				.env("GIT_CONFIG_NOSYSTEM", "1")
@@ -536,6 +723,11 @@ mod tests {
 				.unwrap()
 		};
 		assert!(git(&["init", "-b", "main"]).status.success());
+		// Identity lives in the repo config (not ambient env): every later
+		// command in the fixture — including commit() under test, which
+		// inherits the process environment — has it (review catch).
+		assert!(git(&["config", "user.email", "t@t"]).status.success());
+		assert!(git(&["config", "user.name", "t"]).status.success());
 		std::fs::write(dir.join("f.txt"), "one\n").unwrap();
 		assert!(git(&["add", "."]).status.success());
 		assert!(git(&["commit", "-m", "init"]).status.success());
@@ -564,7 +756,7 @@ mod tests {
 				.unwrap_or(0)
 		));
 		std::fs::create_dir_all(&dir).unwrap();
-		let out = Command::new("git")
+		let out = git_command()
 			.args(["init", "-b", "main"])
 			.current_dir(&dir)
 			.output()
@@ -781,9 +973,8 @@ mod tests {
 	}
 
 	/// Like fixture() but with a clean worktree (committed, nothing pending).
-	fn fixture_clean() -> std::path::PathBuf {
-		let dir = fixture();
-		let out = Command::new("git")
+	fn fixture_clean() -> std::path::PathBuf {		let dir = fixture();
+		let out = git_command()
 			.args(["stash", "-u"])
 			.current_dir(&dir)
 			.env("GIT_AUTHOR_NAME", "t")
@@ -794,5 +985,188 @@ mod tests {
 			.unwrap();
 		assert!(out.status.success());
 		dir
+	}
+
+	#[tokio::test]
+	async fn stage_unstage_round_trip() {
+		let dir = fixture();
+		let root = dir.to_str().unwrap().to_string();
+		stage_paths(root.clone(), vec!["f.txt".to_string()])
+			.await
+			.unwrap();
+		let status = git_status(root.clone()).await.unwrap();
+		assert!(status.contains("1 M.") && status.contains("f.txt"), "{status}");
+		unstage_paths(root.clone(), vec!["f.txt".to_string()])
+			.await
+			.unwrap();
+		let status = git_status(root).await.unwrap();
+		assert!(status.contains(".M"), "{status}");
+		// Empty path lists are no-ops, like the Bun adapter.
+		stage_paths("/tmp".to_string(), vec![]).await.unwrap();
+		unstage_paths("/tmp".to_string(), vec![]).await.unwrap();
+	}
+
+	#[tokio::test]
+	async fn apply_patch_round_trip() {
+		let dir = fixture();
+		let root = dir.to_str().unwrap().to_string();
+		// Capture the worktree diff, revert, re-apply to the index.
+		let id = git_diff_start(root.clone(), false, None, None)
+			.await
+			.unwrap();
+		let patch = git_diff_result(id).await.unwrap();
+		assert!(patch.contains("+two"));
+		run_git(&root, &["checkout", "--", "f.txt"]).unwrap();
+		apply_index_patch(root.clone(), patch).await.unwrap();
+		let status = git_status(root).await.unwrap();
+		// Index holds the change while the reverted worktree does not:
+		// staged-modified AND worktree-modified is the correct outcome.
+		assert!(status.contains("1 MM") && status.contains("f.txt"), "{status}");
+		// Blank patches are no-ops; bad patches surface git's message.
+		apply_index_patch("/tmp".to_string(), "  ".to_string())
+			.await
+			.unwrap();
+		let err = apply_index_patch("/tmp".to_string(), "bogus".to_string())
+			.await
+			.unwrap_err();
+		assert!(err.contains("git apply failed"), "{err}");
+	}
+
+	#[tokio::test]
+	async fn commit_records_message() {
+		let dir = fixture();
+		let root = dir.to_str().unwrap().to_string();
+		stage_paths(root.clone(), vec!["f.txt".to_string()])
+			.await
+			.unwrap();
+		commit(root.clone(), "m3 test commit".to_string())
+			.await
+			.unwrap();
+		let log = run_git(&root, &["log", "--format=%s", "-1"]).unwrap();
+		assert!(log.contains("m3 test commit"), "{log}");
+	}
+
+		#[tokio::test]
+	async fn concurrent_writes_all_succeed() {		let dir = fixture();
+		let root = dir.to_str().unwrap().to_string();
+		// Ten overlapping stage/unstage pairs through the per-repo lane:
+		// every op resolves, none interleaves the index into an error.
+		let mut handles = Vec::new();
+		for _ in 0..10 {
+			let root = root.clone();
+			handles.push(tokio::spawn(async move {
+				stage_paths(root.clone(), vec!["f.txt".to_string()]).await?;
+				unstage_paths(root, vec!["f.txt".to_string()]).await
+			}));
+		}
+		for handle in handles {
+			handle.await.expect("task panicked").unwrap();
+		}
+	}
+
+	#[test]
+	fn lane_key_unifies_spellings() {
+		let dir = std::env::temp_dir();
+		let dotted = dir.join("..").join(
+			dir.file_name()
+				.unwrap_or_default()
+				.to_string_lossy()
+				.as_ref(),
+		);
+		assert_eq!(
+			lane_key(dir.to_str().unwrap()),
+			lane_key(dotted.to_str().unwrap())
+		);
+		// Missing paths fall back to the raw string (git reports the error).
+		assert_eq!(
+			lane_key("/no/such/dir-ever"),
+			"/no/such/dir-ever".to_string()
+		);
+	}
+
+	#[test]
+	fn lane_key_unifies_subdirectories() {
+		// A subdirectory resolves to the same worktree lane as the root.
+		let base = std::env::temp_dir().join(format!(
+			"tauri-lane-fixture-{}",
+			std::time::SystemTime::now()
+				.duration_since(std::time::UNIX_EPOCH)
+				.map(|d| d.as_nanos())
+				.unwrap_or(0)
+		));
+		std::fs::create_dir_all(base.join("sub")).unwrap();
+		let git = |args: &[&str], dir: &std::path::Path| {
+			git_command()
+				.args(args)
+				.current_dir(dir)
+				.env("GIT_CONFIG_NOSYSTEM", "1")
+				.output()
+				.unwrap()
+		};
+		assert!(git(&["init", "-b", "main"], &base).status.success());
+		assert_eq!(
+			lane_key(base.to_str().unwrap()),
+			lane_key(base.join("sub").to_str().unwrap())
+		);
+		let _ = std::fs::remove_dir_all(&base);
+	}
+
+	#[tokio::test]
+	async fn bracket_paths_stage_literally() {
+		let dir = fixture();
+		let root = dir.to_str().unwrap().to_string();
+		std::fs::create_dir_all(dir.join("app").join("[id]")).unwrap();
+		std::fs::create_dir_all(dir.join("app").join("i")).unwrap();
+		std::fs::write(dir.join("app").join("[id]").join("page.tsx"), "x\n").unwrap();
+		std::fs::write(dir.join("app").join("i").join("page.tsx"), "x\n").unwrap();
+		// Without GIT_LITERAL_PATHSPECS the [id] class would also match i/.
+		stage_paths(root.clone(), vec!["app/[id]/page.tsx".to_string()])
+			.await
+			.unwrap();
+		let status = git_status(root).await.unwrap();
+		assert!(status.contains("app/[id]/page.tsx"), "{status}");
+		// The lookalike stays untracked: no staged/unstaged record for it.
+		assert!(status.contains("? app/i/page.tsx"), "{status}");
+		assert!(
+			!status
+				.split('\0')
+				.any(|r| r.contains("app/i/page.tsx") && !r.starts_with('?')),
+			"{status}"
+		);
+	}
+
+	#[tokio::test]
+	async fn location_env_never_redirects() {
+		// The scrub contract, asserted structurally: every git child is
+		// built by git_command(), which removes the location variables.
+		// (Deliberately no process-env mutation here: set_var races with
+		// parallel tests sharing the process environment.)
+		let removed: Vec<String> = git_command()
+			.get_envs()
+			.filter_map(|(key, value)| {
+				if value.is_none() {
+					key.to_str().map(String::from)
+				} else {
+					None
+				}
+			})
+			.collect();
+		for var in [
+			"GIT_DIR",
+			"GIT_WORK_TREE",
+			"GIT_INDEX_FILE",
+			"GIT_OBJECT_DIRECTORY",
+			"GIT_COMMON_DIR",
+		] {
+			assert!(removed.iter().any(|k| k == var), "{removed:?}");
+		}
+		// And the lane still resolves the fixture worktree on its own.
+		let dir = fixture();
+		let root = dir.to_str().unwrap().to_string();
+		let key = lane_key(&root);
+		assert!(
+			key.ends_with(dir.file_name().unwrap().to_str().unwrap()),
+			"{key}"
+		);
 	}
 }
