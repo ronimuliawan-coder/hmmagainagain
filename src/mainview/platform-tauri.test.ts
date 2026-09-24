@@ -31,6 +31,13 @@ function stubBridge(): void {
 	};
 	let nextId = 1;
 	const live = new Set<number>();
+	const listeners = new Map<
+		string,
+		((payload: { payload: unknown }) => void)[]
+	>();
+	const emit = (event: string, payload: unknown): void => {
+		for (const handler of listeners.get(event) ?? []) handler({ payload });
+	};
 	g.window = {
 		__TAURI__: {
 			core: {
@@ -57,12 +64,70 @@ function stubBridge(): void {
 							live.delete(args?.id as number);
 							return Promise.resolve(undefined);
 						}
+						case "git_log_stream": {
+							const runId = args?.runId as string;
+							emit("git-log-commit", {
+								run_id: runId,
+								commit: {
+									oid: "o1",
+									shortOid: "o1",
+									authorName: "A",
+									authorEmail: "a@x",
+									date: "2026-01-01T00:00:00Z",
+									subject: "one",
+									refs: "HEAD -> main",
+								},
+							});
+							emit("git-log-commit", {
+								run_id: runId,
+								commit: {
+									oid: "o2",
+									shortOid: "o2",
+									authorName: "A",
+									authorEmail: "a@x",
+									date: "2026-01-01T00:00:00Z",
+									subject: "two",
+									refs: "",
+								},
+							});
+							emit("git-log-done", { run_id: runId, count: 2 });
+							return Promise.resolve(2);
+						}
+						case "git_branches":
+							return Promise.resolve([
+								{ name: "main", oid: "o1", current: true },
+							]);
+						case "git_create_branch":
+						case "git_switch_branch":
+							return Promise.resolve(undefined);
 						case "git_worktree_paths":
 							return Promise.resolve("b.txt\0a.txt\0");
 						default:
 							return Promise.reject(new Error(`unexpected: ${command}`));
 					}
 				},
+			},
+			event: {
+				// Registrations settle asynchronously (like Tauri's IPC):
+				// the bridge must await them before invoking, or a short
+				// stream's done event lands with nobody listening.
+				listen: (
+					event: string,
+					handler: (payload: { payload: unknown }) => void,
+				) =>
+					new Promise<() => void>((resolve) => {
+						setTimeout(() => {
+							const list = listeners.get(event) ?? [];
+							list.push(handler);
+							listeners.set(event, list);
+							resolve(() => {
+								listeners.set(
+									event,
+									(listeners.get(event) ?? []).filter((h) => h !== handler),
+								);
+							});
+						}, 10);
+					}),
 			},
 		},
 	};
@@ -125,12 +190,41 @@ describe("platform-tauri (M1 bridge)", () => {
 		});
 	});
 
+	test("streams history and maps branch ops", async () => {
+		stubBridge();
+		calls.length = 0;
+		const platform = createTauriPlatform();
+		const subjects: string[] = [];
+		const result = await platform.gitLog(
+			"/r",
+			{ limit: 50, skip: 0 },
+			(commit) => subjects.push(commit.subject),
+		);
+		expect(result).toEqual({ count: 2 });
+		expect(subjects).toEqual(["one", "two"]);
+		expect(
+			calls.find((c) => c.command === "git_log_stream")?.args,
+		).toMatchObject({ root: "/r", limit: 50, skip: 0 });
+
+		const branches = await platform.gitBranches("/r");
+		expect(branches).toEqual([{ name: "main", oid: "o1", current: true }]);
+
+		await platform.gitCreateBranch("/r", "feature", true);
+		expect(
+			calls.find((c) => c.command === "git_create_branch")?.args,
+		).toMatchObject({ root: "/r", name: "feature", switchTo: true });
+		await platform.gitSwitchBranch("/r", "main");
+		expect(
+			calls.find((c) => c.command === "git_switch_branch")?.args,
+		).toMatchObject({ root: "/r", name: "main" });
+	});
+
 	test("unowned units reject with a pointer", async () => {
 		stubBridge();
 		const platform = createTauriPlatform();
-		await expect(platform.gitLog("/r", {}, () => {})).rejects.toThrow(
-			/later migration unit/,
-		);
+		await expect(
+			platform.gitRemote("/r", "fetch", { remote: "origin" }),
+		).rejects.toThrow(/later migration unit/);
 		await expect(platform.commit("/r", "x")).rejects.toThrow(
 			/later migration unit/,
 		);
