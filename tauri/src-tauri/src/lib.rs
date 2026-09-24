@@ -15,7 +15,9 @@ pub fn run() {
 			git::read_repo,
 			git::git_status,
 			git::git_worktree_paths,
-			git::git_diff
+			git::git_diff_start,
+			git::git_diff_abort,
+			git::git_diff_result
 		])
 		.run(tauri::generate_context!())
 		.expect("error while running tauri application");

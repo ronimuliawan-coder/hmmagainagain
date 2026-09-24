@@ -47,6 +47,10 @@ interface TauriRepoInfo {
 	head: string;
 }
 
+function toDiffResult(patch: string): DiffResult {
+	return { patch, files: parsePatchStats(patch) };
+}
+
 export function createTauriPlatform(): Platform {
 	return {
 		kind: "tauri",
@@ -72,12 +76,38 @@ export function createTauriPlatform(): Platform {
 			invoke<string>("git_status", { root }).then((raw) => parseStatusV2(raw)),
 
 		gitDiff: (root: string, options?: GitDiffOptions): Promise<DiffResult> =>
-			invoke<string>("git_diff", {
+			invoke<number>("git_diff_start", {
 				root,
 				staged: options?.staged ?? false,
 				from: options?.from ?? null,
 				to: options?.to ?? null,
-			}).then((patch) => ({ patch, files: parsePatchStats(patch) })),
+			}).then((id) => {
+				const signal = options?.signal;
+				// Already dead on arrival: kill the just-started run.
+				if (signal?.aborted) {
+					void invoke("git_diff_abort", { id });
+					return Promise.reject(new Error("diff aborted"));
+				}
+				const result = invoke<string>("git_diff_result", { id });
+				if (!signal) return result.then(toDiffResult);
+				return new Promise<DiffResult>((resolve, reject) => {
+					const onAbort = (): void => {
+						void invoke("git_diff_abort", { id });
+						reject(new Error("diff aborted"));
+					};
+					signal.addEventListener("abort", onAbort, { once: true });
+					result.then(
+						(patch) => {
+							signal.removeEventListener("abort", onAbort);
+							resolve(toDiffResult(patch));
+						},
+						(error: unknown) => {
+							signal.removeEventListener("abort", onAbort);
+							reject(error instanceof Error ? error : new Error(String(error)));
+						},
+					);
+				});
+			}),
 
 		gitWorktreePaths: (root: string): Promise<string[]> =>
 			invoke<string>("git_worktree_paths", { root }).then((raw) =>

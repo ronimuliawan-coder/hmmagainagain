@@ -29,6 +29,8 @@ function stubBridge(): void {
 	const g = globalThis as unknown as {
 		window?: { __TAURI__?: unknown };
 	};
+	let nextId = 1;
+	const live = new Set<number>();
 	g.window = {
 		__TAURI__: {
 			core: {
@@ -39,8 +41,22 @@ function stubBridge(): void {
 							return Promise.resolve({ branch: "main", head: "abc123" });
 						case "git_status":
 							return Promise.resolve(PORCELAIN);
-						case "git_diff":
+						case "git_diff_start": {
+							const id = nextId++;
+							live.add(id);
+							return Promise.resolve(id);
+						}
+						case "git_diff_result": {
+							const id = args?.id as number;
+							if (!live.delete(id)) {
+								return Promise.reject(new Error("unknown or aborted diff"));
+							}
 							return Promise.resolve(PATCH);
+						}
+						case "git_diff_abort": {
+							live.delete(args?.id as number);
+							return Promise.resolve(undefined);
+						}
 						case "git_worktree_paths":
 							return Promise.resolve("b.txt\0a.txt\0");
 						default:
@@ -81,13 +97,32 @@ describe("platform-tauri (M1 bridge)", () => {
 		});
 
 		const diff = await platform.gitDiff("/r", { staged: true });
-		expect(calls.at(-1)?.args).toMatchObject({ staged: true });
+		expect(
+			calls.find((c) => c.command === "git_diff_start")?.args,
+		).toMatchObject({ staged: true });
 		expect(diff.patch).toBe(PATCH);
 		expect(diff.files.map((f) => f.path)).toEqual(["f.txt"]);
 		expect(diff.files[0]).toMatchObject({ additions: 1, deletions: 1 });
 
 		const paths = await platform.gitWorktreePaths("/r");
 		expect(paths).toEqual(["a.txt", "b.txt"]);
+	});
+
+	test("aborting the signal kills the run and rejects", async () => {
+		stubBridge();
+		calls.length = 0;
+		const platform = createTauriPlatform();
+		const controller = new AbortController();
+		const pending = platform.gitDiff("/r", { signal: controller.signal });
+		// NOTE: the rejects assertion must be created after the abort —
+		// bun:test hangs when expect().rejects is attached to a promise
+		// that settles later (reproduced on bare promises, 1.4.2).
+		controller.abort();
+		await expect(pending).rejects.toThrow("diff aborted");
+		expect(calls.some((c) => c.command === "git_diff_abort")).toBe(true);
+		await expect(platform.gitDiff("/r")).resolves.toMatchObject({
+			patch: PATCH,
+		});
 	});
 
 	test("unowned units reject with a pointer", async () => {
