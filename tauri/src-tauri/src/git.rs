@@ -50,16 +50,19 @@ fn reject_dash(value: &Option<String>, what: &str) -> Result<(), String> {
 }
 
 /// Every git child process in this file is built here. Location variables
-/// inherited from the app's own environment (GIT_DIR, GIT_WORK_TREE,
-/// GIT_INDEX_FILE) would redirect git at a different repository or index
-/// than `root` — writes could land in the wrong repo. They are always
-/// removed; callers pass locations explicitly via argv/cwd.
+/// inherited from the app's own environment would redirect git at a
+/// different repository, index, or object store than `root` — writes could
+/// land in the wrong repo, or blobs could be stored where a later git
+/// cannot find them. They are always removed; callers pass locations
+/// explicitly via argv/cwd.
 fn git_command() -> Command {
 	let mut command = Command::new("git");
 	command
 		.env_remove("GIT_DIR")
 		.env_remove("GIT_WORK_TREE")
-		.env_remove("GIT_INDEX_FILE");
+		.env_remove("GIT_INDEX_FILE")
+		.env_remove("GIT_OBJECT_DIRECTORY")
+		.env_remove("GIT_COMMON_DIR");
 	command
 }
 
@@ -1142,6 +1145,8 @@ mod tests {
 		std::env::set_var("GIT_DIR", format!("{other}/.git"));
 		std::env::set_var("GIT_WORK_TREE", &other);
 		std::env::set_var("GIT_INDEX_FILE", format!("{other}/.git/index"));
+		std::env::set_var("GIT_OBJECT_DIRECTORY", format!("{other}/.git/objects"));
+		std::env::set_var("GIT_COMMON_DIR", format!("{other}/.git"));
 		// The lane still resolves the fixture worktree...
 		let key = lane_key(&root);
 		assert!(
@@ -1164,5 +1169,7 @@ mod tests {
 		std::env::remove_var("GIT_DIR");
 		std::env::remove_var("GIT_WORK_TREE");
 		std::env::remove_var("GIT_INDEX_FILE");
+		std::env::remove_var("GIT_OBJECT_DIRECTORY");
+		std::env::remove_var("GIT_COMMON_DIR");
 	}
 }
