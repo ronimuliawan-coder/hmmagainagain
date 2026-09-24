@@ -1,5 +1,7 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 mod git;
+mod remote;
+mod watch;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -10,6 +12,7 @@ fn greet(name: &str) -> String {
 pub fn run() {
 	tauri::Builder::default()
 		.plugin(tauri_plugin_opener::init())
+		.plugin(tauri_plugin_dialog::init())
 		.invoke_handler(tauri::generate_handler![
 			greet,
 			git::read_repo,
@@ -25,7 +28,12 @@ pub fn run() {
 			git::stage_paths,
 			git::unstage_paths,
 			git::apply_index_patch,
-			git::commit
+			git::commit,
+			remote::git_remote_start,
+			remote::git_remote_abort,
+			remote::git_remote_result,
+			watch::watch_start,
+			watch::watch_stop
 		])
 		.run(tauri::generate_context!())
 		.expect("error while running tauri application");

@@ -54,8 +54,9 @@ fn reject_dash(value: &Option<String>, what: &str) -> Result<(), String> {
 /// different repository, index, or object store than `root` — writes could
 /// land in the wrong repo, or blobs could be stored where a later git
 /// cannot find them. They are always removed; callers pass locations
-/// explicitly via argv/cwd.
-fn git_command() -> Command {
+/// explicitly via argv/cwd. Shared with remote.rs (same helper, same
+/// guarantee for transfer processes).
+pub(crate) fn git_command() -> Command {
 	let mut command = Command::new("git");
 	command
 		.env_remove("GIT_DIR")
@@ -101,30 +102,30 @@ fn write_queues() -> &'static Mutex<HashMap<String, std::sync::Arc<Mutex<()>>>> 
 	QUEUES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Clones the repo's lane Arc without acquiring it. Remote start/result
+/// join the same serialization point around their critical sections (see
+/// remote.rs for the documented scope).
+pub(crate) fn write_lock_lane(root: &str) -> std::sync::Arc<Mutex<()>> {
+	let mut queues = write_queues()
+		.lock()
+		.unwrap_or_else(|e| e.into_inner());
+	let lane = queues
+		.entry(lane_key(root))
+		.or_insert_with(|| std::sync::Arc::new(Mutex::new(())))
+		.clone();
+	if queues.len() > 64 {
+		queues.retain(|_, lane| std::sync::Arc::strong_count(lane) > 1);
+	}
+	lane
+}
+
 /// Runs `op` with the repo's write lane held, on the blocking pool.
 async fn with_write_lock<F, T>(root: String, op: F) -> Result<T, String>
 where
 	F: FnOnce() -> Result<T, String> + Send + 'static,
 	T: Send + 'static,
 {
-	let lane = {
-		let mut queues = write_queues()
-			.lock()
-			.map_err(|e| format!("lock: {e}"))?;
-		let lane = queues
-			.entry(lane_key(&root))
-			.or_insert_with(|| std::sync::Arc::new(Mutex::new(())))
-			.clone();
-		// Cap idle lanes so opening many repositories never grows the map
-		// without bound. Eviction is race-free: it runs under the map lock,
-		// and an entry is dropped only when strong_count is 1 (the map is
-		// the sole holder — no op holds or is about to hold it, since
-		// cloning also happens under this lock).
-		if queues.len() > 64 {
-			queues.retain(|_, lane| std::sync::Arc::strong_count(lane) > 1);
-		}
-		lane
-	};
+	let lane = write_lock_lane(&root);
 	tauri::async_runtime::spawn_blocking(move || {
 		let _held = lane.lock().unwrap_or_else(|e| e.into_inner());
 		op()
