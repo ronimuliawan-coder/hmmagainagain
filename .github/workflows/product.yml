@@ -47,7 +47,7 @@ jobs:
             echo "run-ci=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          count="$(curl -fsSL -G \
+          count="$(curl -fsSL --max-time 30 -G \
             --data-urlencode "head=${GITHUB_REPOSITORY_OWNER}:${GITHUB_REF_NAME}" \
             --data-urlencode "state=open" \
             -H "Authorization: Bearer $GH_TOKEN" \
