@@ -170,24 +170,54 @@ pub async fn git_diff_abort(id: u64) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn git_diff_result(id: u64) -> Result<String, String> {
-	let child = registry()
+	// Pipes are taken while the Child stays registered, so a concurrent
+	// abort still finds something to kill; draining both avoids a pipe
+	// deadlock on large output.
+	let (mut stdout, mut stderr) = {
+		let mut registry = registry().lock().map_err(|e| format!("lock: {e}"))?;
+		let child = registry
+			.children
+			.get_mut(&id)
+			.ok_or_else(|| "unknown or aborted diff".to_string())?;
+		(
+			child.stdout.take().ok_or("stdout already taken")?,
+			child.stderr.take().ok_or("stderr already taken")?,
+		)
+	};
+	let (out_bytes, err_bytes) =
+		tauri::async_runtime::spawn_blocking(move || {
+			use std::io::Read;
+			let err_reader = std::thread::spawn(move || {
+				let mut buf = Vec::new();
+				let _ = stderr.read_to_end(&mut buf);
+				buf
+			});
+			let mut out = Vec::new();
+			let _ = stdout.read_to_end(&mut out);
+			(out, err_reader.join().unwrap_or_default())
+		})
+		.await
+		.map_err(|e| format!("worker: {e}"))?;
+	// An abort during the drain removed and killed the child: surface it
+	// instead of a phantom success.
+	let mut child = registry()
 		.lock()
 		.map_err(|e| format!("lock: {e}"))?
 		.children
 		.remove(&id)
 		.ok_or_else(|| "unknown or aborted diff".to_string())?;
-	let output = tauri::async_runtime::spawn_blocking(move || child.wait_with_output())
+	let status = tauri::async_runtime::spawn_blocking(move || child.wait())
 		.await
 		.map_err(|e| format!("worker: {e}"))?
 		.map_err(|e| format!("wait: {e}"))?;
-	if !output.status.success() {
+	if !status.success() {
 		return Err(format!(
 			"exit {}: {}",
-			output.status.code().unwrap_or(-1),
-			String::from_utf8_lossy(&output.stderr)
+			status.code().unwrap_or(-1),
+			String::from_utf8_lossy(&err_bytes)
 		));
 	}
-	Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+	Ok(String::from_utf8_lossy(&out_bytes).into_owned())
 }
 
 #[derive(serde::Serialize, Debug)]
@@ -307,5 +337,35 @@ mod tests {
 			err.contains("unknown or aborted"),
 			"unexpected error: {err}"
 		);
+	}
+
+	#[tokio::test]
+	async fn abort_during_result_errors() {
+		let dir = fixture();
+		// A 100MB repetitive worktree change keeps git generating (and the
+		// drain blocked) long enough that the abort below lands mid-flight
+		// on any real machine — no timing luck required.
+		let big = "x".repeat(100) + "\n";
+		let mut blob = String::with_capacity(100 * 1024 * 1024);
+		for _ in 0..(1024 * 1024) {
+			blob.push_str(&big);
+		}
+		std::fs::write(dir.join("f.txt"), blob).unwrap();
+		let root = dir.to_str().unwrap().to_string();
+		let id = git_diff_start(root, false, None, None).await.unwrap();
+		let result_task = tokio::spawn(async move { git_diff_result(id).await });
+		tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+		git_diff_abort(id).await.unwrap();
+		let err = result_task
+			.await
+			.expect("result task panicked")
+			.unwrap_err();
+		assert!(
+			err.contains("unknown or aborted"),
+			"aborted drain must reject, got: {err}"
+		);
+		// No leaked registry entries after the race.
+		let left = registry().lock().unwrap().children.len();
+		assert_eq!(left, 0, "{left} entries leaked");
 	}
 }
