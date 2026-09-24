@@ -342,6 +342,15 @@ mod tests {
 	#[tokio::test]
 	async fn abort_during_result_errors() {
 		let dir = fixture();
+		// The 100MB fixture must not outlive the test (nor survive a
+		// panic): remove it on drop, not just on the happy path.
+		struct Cleanup<'a>(&'a std::path::Path);
+		impl Drop for Cleanup<'_> {
+			fn drop(&mut self) {
+				let _ = std::fs::remove_dir_all(self.0);
+			}
+		}
+		let _cleanup = Cleanup(dir.as_path());
 		// A 100MB repetitive worktree change keeps git generating (and the
 		// drain blocked) long enough that the abort below lands mid-flight
 		// on any real machine — no timing luck required.
@@ -364,8 +373,13 @@ mod tests {
 			err.contains("unknown or aborted"),
 			"aborted drain must reject, got: {err}"
 		);
-		// No leaked registry entries after the race.
-		let left = registry().lock().unwrap().children.len();
-		assert_eq!(left, 0, "{left} entries leaked");
+		// The registry is process-wide and tests run on parallel threads,
+		// so only this diff's own entry may be asserted — never the total.
+		let leaked = registry()
+			.lock()
+			.unwrap()
+			.children
+			.contains_key(&id);
+		assert!(!leaked, "entry {id} leaked");
 	}
 }
