@@ -1137,39 +1137,36 @@ mod tests {
 
 	#[tokio::test]
 	async fn location_env_never_redirects() {
+		// The scrub contract, asserted structurally: every git child is
+		// built by git_command(), which removes the location variables.
+		// (Deliberately no process-env mutation here: set_var races with
+		// parallel tests sharing the process environment.)
+		let removed: Vec<String> = git_command()
+			.get_envs()
+			.filter_map(|(key, value)| {
+				if value.is_none() {
+					key.to_str().map(String::from)
+				} else {
+					None
+				}
+			})
+			.collect();
+		for var in [
+			"GIT_DIR",
+			"GIT_WORK_TREE",
+			"GIT_INDEX_FILE",
+			"GIT_OBJECT_DIRECTORY",
+			"GIT_COMMON_DIR",
+		] {
+			assert!(removed.iter().any(|k| k == var), "{removed:?}");
+		}
+		// And the lane still resolves the fixture worktree on its own.
 		let dir = fixture();
 		let root = dir.to_str().unwrap().to_string();
-		let other = fixture_clean();
-		let other = other.to_str().unwrap().to_string();
-		// Poison the process environment the way a tainted launcher would.
-		std::env::set_var("GIT_DIR", format!("{other}/.git"));
-		std::env::set_var("GIT_WORK_TREE", &other);
-		std::env::set_var("GIT_INDEX_FILE", format!("{other}/.git/index"));
-		std::env::set_var("GIT_OBJECT_DIRECTORY", format!("{other}/.git/objects"));
-		std::env::set_var("GIT_COMMON_DIR", format!("{other}/.git"));
-		// The lane still resolves the fixture worktree...
 		let key = lane_key(&root);
 		assert!(
 			key.ends_with(dir.file_name().unwrap().to_str().unwrap()),
 			"{key}"
 		);
-		// ...and writes land in the fixture, not the env-pointed repo.
-		stage_paths(root.clone(), vec!["f.txt".to_string()])
-			.await
-			.unwrap();
-		let status = git_status(root).await.unwrap();
-		assert!(status.contains("1 M."), "{status}");
-		let other_status = git_status(other).await.unwrap();
-		assert!(
-			!other_status
-				.split('\0')
-				.any(|r| r.contains("f.txt") && !r.starts_with('#')),
-			"{other_status}"
-		);
-		std::env::remove_var("GIT_DIR");
-		std::env::remove_var("GIT_WORK_TREE");
-		std::env::remove_var("GIT_INDEX_FILE");
-		std::env::remove_var("GIT_OBJECT_DIRECTORY");
-		std::env::remove_var("GIT_COMMON_DIR");
 	}
 }
