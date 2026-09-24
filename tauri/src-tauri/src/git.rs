@@ -16,7 +16,7 @@ use std::sync::{Mutex, OnceLock};
 use tauri::Emitter;
 
 fn run_git(root: &str, args: &[&str]) -> Result<String, String> {
-	let output = Command::new("git")
+	let output = git_command()
 		.args(args)
 		.current_dir(root)
 		.output()
@@ -49,6 +49,20 @@ fn reject_dash(value: &Option<String>, what: &str) -> Result<(), String> {
 	Ok(())
 }
 
+/// Every git child process in this file is built here. Location variables
+/// inherited from the app's own environment (GIT_DIR, GIT_WORK_TREE,
+/// GIT_INDEX_FILE) would redirect git at a different repository or index
+/// than `root` — writes could land in the wrong repo. They are always
+/// removed; callers pass locations explicitly via argv/cwd.
+fn git_command() -> Command {
+	let mut command = Command::new("git");
+	command
+		.env_remove("GIT_DIR")
+		.env_remove("GIT_WORK_TREE")
+		.env_remove("GIT_INDEX_FILE");
+	command
+}
+
 /// Canonical lane key for a repository root. A subdirectory of a repo must
 /// serialize on the same lane as the root (git discovers the same index
 /// from both), so the key resolves the worktree top-level first. Falls back
@@ -56,7 +70,7 @@ fn reject_dash(value: &Option<String>, what: &str) -> Result<(), String> {
 /// (yet) exist; git itself then reports the real error. Only the lane key
 /// is resolved — git always receives the original root.
 fn lane_key(root: &str) -> String {
-	if let Ok(output) = Command::new("git")
+	if let Ok(output) = git_command()
 		.args(["rev-parse", "--show-toplevel"])
 		.current_dir(root)
 		.output()
@@ -130,7 +144,7 @@ fn run_write_env(
 	stdin: Option<&str>,
 	extra_env: &[(&str, &str)],
 ) -> Result<(), String> {
-	let mut child = Command::new("git");
+	let mut child = git_command();
 	child
 		.args(args)
 		.current_dir(root)
@@ -268,7 +282,7 @@ pub async fn git_diff_start(
 	reject_dash(&to, "to ref")?;
 	let argv = diff_argv(staged, &from, &to);
 	let child = tauri::async_runtime::spawn_blocking(move || {
-		Command::new("git")
+		git_command()
 			.args(&argv)
 			.current_dir(&root)
 			.stdout(std::process::Stdio::piped())
@@ -405,7 +419,7 @@ pub async fn git_log_stream(
 	let emit_app = app.clone();
 	let done_id = run_id.clone();
 	let (count, status) = tauri::async_runtime::spawn_blocking(move || {
-		let mut child = Command::new("git")
+		let mut child = git_command()
 			.args(&argv)
 			.current_dir(&root)
 			.stdout(std::process::Stdio::piped())
@@ -683,7 +697,6 @@ pub async fn commit(root: String, message: String) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use std::process::Command;
 
 	fn fixture() -> std::path::PathBuf {
 		let dir = std::env::temp_dir().join(format!(
@@ -695,7 +708,7 @@ mod tests {
 		));
 		std::fs::create_dir_all(&dir).unwrap();
 		let git = |args: &[&str]| {
-			Command::new("git")
+			git_command()
 				.args(args)
 				.current_dir(&dir)
 				.env("GIT_CONFIG_NOSYSTEM", "1")
@@ -740,7 +753,7 @@ mod tests {
 				.unwrap_or(0)
 		));
 		std::fs::create_dir_all(&dir).unwrap();
-		let out = Command::new("git")
+		let out = git_command()
 			.args(["init", "-b", "main"])
 			.current_dir(&dir)
 			.output()
@@ -958,7 +971,7 @@ mod tests {
 
 	/// Like fixture() but with a clean worktree (committed, nothing pending).
 	fn fixture_clean() -> std::path::PathBuf {		let dir = fixture();
-		let out = Command::new("git")
+		let out = git_command()
 			.args(["stash", "-u"])
 			.current_dir(&dir)
 			.env("GIT_AUTHOR_NAME", "t")
@@ -1030,7 +1043,7 @@ mod tests {
 		assert!(log.contains("m3 test commit"), "{log}");
 	}
 
-	#[tokio::test]
+		#[tokio::test]
 	async fn concurrent_writes_all_succeed() {		let dir = fixture();
 		let root = dir.to_str().unwrap().to_string();
 		// Ten overlapping stage/unstage pairs through the per-repo lane:
@@ -1080,7 +1093,7 @@ mod tests {
 		));
 		std::fs::create_dir_all(base.join("sub")).unwrap();
 		let git = |args: &[&str], dir: &std::path::Path| {
-			Command::new("git")
+			git_command()
 				.args(args)
 				.current_dir(dir)
 				.env("GIT_CONFIG_NOSYSTEM", "1")
@@ -1117,5 +1130,39 @@ mod tests {
 				.any(|r| r.contains("app/i/page.tsx") && !r.starts_with('?')),
 			"{status}"
 		);
+	}
+
+	#[tokio::test]
+	async fn location_env_never_redirects() {
+		let dir = fixture();
+		let root = dir.to_str().unwrap().to_string();
+		let other = fixture_clean();
+		let other = other.to_str().unwrap().to_string();
+		// Poison the process environment the way a tainted launcher would.
+		std::env::set_var("GIT_DIR", format!("{other}/.git"));
+		std::env::set_var("GIT_WORK_TREE", &other);
+		std::env::set_var("GIT_INDEX_FILE", format!("{other}/.git/index"));
+		// The lane still resolves the fixture worktree...
+		let key = lane_key(&root);
+		assert!(
+			key.ends_with(dir.file_name().unwrap().to_str().unwrap()),
+			"{key}"
+		);
+		// ...and writes land in the fixture, not the env-pointed repo.
+		stage_paths(root.clone(), vec!["f.txt".to_string()])
+			.await
+			.unwrap();
+		let status = git_status(root).await.unwrap();
+		assert!(status.contains("1 M."), "{status}");
+		let other_status = git_status(other).await.unwrap();
+		assert!(
+			!other_status
+				.split('\0')
+				.any(|r| r.contains("f.txt") && !r.starts_with('#')),
+			"{other_status}"
+		);
+		std::env::remove_var("GIT_DIR");
+		std::env::remove_var("GIT_WORK_TREE");
+		std::env::remove_var("GIT_INDEX_FILE");
 	}
 }
