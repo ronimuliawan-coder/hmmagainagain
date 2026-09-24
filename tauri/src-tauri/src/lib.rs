@@ -21,7 +21,11 @@ pub fn run() {
 			git::git_log_stream,
 			git::git_branches,
 			git::git_create_branch,
-			git::git_switch_branch
+			git::git_switch_branch,
+			git::stage_paths,
+			git::unstage_paths,
+			git::apply_index_patch,
+			git::commit
 		])
 		.run(tauri::generate_context!())
 		.expect("error while running tauri application");

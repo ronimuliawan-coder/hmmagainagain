@@ -207,9 +207,13 @@ export function createTauriPlatform(): Platform {
 		gitSwitchBranch: (root: string, name: string): Promise<void> =>
 			invoke<void>("git_switch_branch", { root, name }).then(() => undefined),
 		gitRemote: () => notYet("gitRemote"),
-		stagePaths: () => notYet("stagePaths"),
-		unstagePaths: () => notYet("unstagePaths"),
-		applyIndexPatch: () => notYet("applyIndexPatch"),
-		commit: () => notYet("commit"),
+		stagePaths: (root: string, paths: string[]): Promise<void> =>
+			invoke<void>("stage_paths", { root, paths }).then(() => undefined),
+		unstagePaths: (root: string, paths: string[]): Promise<void> =>
+			invoke<void>("unstage_paths", { root, paths }).then(() => undefined),
+		applyIndexPatch: (root: string, patch: string): Promise<void> =>
+			invoke<void>("apply_index_patch", { root, patch }).then(() => undefined),
+		commit: (root: string, message: string): Promise<void> =>
+			invoke<void>("commit", { root, message }).then(() => undefined),
 	};
 }

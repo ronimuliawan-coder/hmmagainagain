@@ -48,6 +48,79 @@ fn reject_dash(value: &Option<String>, what: &str) -> Result<(), String> {
 	Ok(())
 }
 
+// ---- Serialized index writes (per-repo lanes) ----
+//
+// Mirrors the Bun adapter's write queue: every mutation of a repository
+// runs under that repo's lane so concurrent UI actions cannot interleave
+// index writes. The lane lives only for the blocking section (never held
+// across .await); a poisoned lane recovers instead of wedging the repo.
+
+fn write_queues() -> &'static Mutex<HashMap<String, std::sync::Arc<Mutex<()>>>> {
+	static QUEUES: OnceLock<Mutex<HashMap<String, std::sync::Arc<Mutex<()>>>>> =
+		OnceLock::new();
+	QUEUES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Runs `op` with the repo's write lane held, on the blocking pool.
+async fn with_write_lock<F, T>(root: String, op: F) -> Result<T, String>
+where
+	F: FnOnce() -> Result<T, String> + Send + 'static,
+	T: Send + 'static,
+{
+	let lane = write_queues()
+		.lock()
+		.map_err(|e| format!("lock: {e}"))?
+		.entry(root.clone())
+		.or_insert_with(|| std::sync::Arc::new(Mutex::new(())))
+		.clone();
+	tauri::async_runtime::spawn_blocking(move || {
+		let _held = lane.lock().unwrap_or_else(|e| e.into_inner());
+		op()
+	})
+	.await
+	.map_err(|e| format!("worker: {e}"))?
+}
+
+/// One-shot write: argv + optional stdin, stdout/stderr collected.
+/// Failures carry stderr verbatim (hook output, "patch does not apply")
+/// because the UI displays it as-is.
+fn run_write(root: &str, args: &[&str], stdin: Option<&str>) -> Result<(), String> {
+	let mut child = Command::new("git")
+		.args(args)
+		.current_dir(root)
+		.stdin(if stdin.is_some() {
+			std::process::Stdio::piped()
+		} else {
+			std::process::Stdio::null()
+		})
+		.stdout(std::process::Stdio::piped())
+		.stderr(std::process::Stdio::piped())
+		.spawn()
+		.map_err(|e| format!("spawn: {e}"))?;
+	if let Some(text) = stdin {
+		use std::io::Write;
+		child
+			.stdin
+			.as_mut()
+			.ok_or("stdin unavailable")?
+			.write_all(text.as_bytes())
+			.map_err(|e| format!("stdin: {e}"))?;
+		// Explicit close (then drop): commands waiting on stdin see EOF.
+		child.stdin.take();
+	}
+	let output = child
+		.wait_with_output()
+		.map_err(|e| format!("wait: {e}"))?;
+	if !output.status.success() {
+		return Err(format!(
+			"git {} failed: {}",
+			args[0],
+			String::from_utf8_lossy(&output.stderr)
+		));
+	}
+	Ok(())
+}
+
 fn diff_argv(staged: bool, from: &Option<String>, to: &Option<String>) -> Vec<String> {
 	// Mirrors the Bun adapter's ranges plus --no-color (a forced color
 	// config would otherwise poison the patch with escape sequences).
@@ -446,28 +519,20 @@ pub async fn git_branches(root: String) -> Result<Vec<BranchInfo>, String> {
 
 /// Refuses when the worktree or index holds ANY change — nothing is stashed,
 /// nothing is discarded (mirrors the Bun adapter's safety centerpiece).
-async fn assert_clean_worktree(root: &str) -> Result<(), String> {
-	let raw = run_git_async(
-		root.to_string(),
-		vec![
-			"status".to_string(),
-			"--porcelain=v2".to_string(),
-			"-z".to_string(),
-			"-uall".to_string(),
-		],
-	)
-	.await?;
-	if status_has_entries(&raw) {
-		let count = raw
-			.split('\0')
-			.filter(|r| !r.is_empty())
-			.filter(|r| matches!(r.chars().next(), Some('1' | '2' | 'u' | '?')))
-			.count();
-		return Err(format!(
-			"refusing to switch branches: the worktree has {count} change(s) (commit them first — nothing is auto-discarded)"
-		));
+/// Synchronous: runs inside a held write lane.
+fn assert_clean_worktree_sync(root: &str) -> Result<(), String> {
+	let raw = run_git(root, &["status", "--porcelain=v2", "-z", "-uall"])?;
+	if !status_has_entries(&raw) {
+		return Ok(());
 	}
-	Ok(())
+	let count = raw
+		.split('\0')
+		.filter(|r| !r.is_empty())
+		.filter(|r| matches!(r.chars().next(), Some('1' | '2' | 'u' | '?')))
+		.count();
+	Err(format!(
+		"refusing to switch branches: the worktree has {count} change(s) (commit them first — nothing is auto-discarded)"
+	))
 }
 
 fn reject_empty(value: &str, what: &str) -> Result<(), String> {
@@ -489,24 +554,74 @@ pub async fn git_create_branch(
 	switch_to: bool,
 ) -> Result<(), String> {
 	reject_empty(&name, "branch name")?;
-	// NOTE (M3): the Bun adapter serializes branch writes through the
-	// per-repo write queue; the check-then-act above races under
-	// concurrency until M3 ports the queue and absorbs these ops.
-	if switch_to {
-		assert_clean_worktree(&root).await?;
-		run_git_async(root, vec!["switch".to_string(), "-c".to_string(), name]).await?;
-	} else {
-		run_git_async(root, vec!["branch".to_string(), name]).await?;
-	}
-	Ok(())
+	with_write_lock(root.clone(), move || {
+		if switch_to {
+			assert_clean_worktree_sync(&root)?;
+			run_write(&root, &["switch", "-c", &name], None)
+		} else {
+			run_write(&root, &["branch", &name], None)
+		}
+	})
+	.await
 }
 
 #[tauri::command]
 pub async fn git_switch_branch(root: String, name: String) -> Result<(), String> {
 	reject_empty(&name, "branch name")?;
-	assert_clean_worktree(&root).await?;
-	run_git_async(root, vec!["switch".to_string(), name]).await?;
-	Ok(())
+	with_write_lock(root.clone(), move || {
+		assert_clean_worktree_sync(&root)?;
+		run_write(&root, &["switch", &name], None)
+	})
+	.await
+}
+
+#[tauri::command]
+pub async fn stage_paths(root: String, paths: Vec<String>) -> Result<(), String> {
+	if paths.is_empty() {
+		return Ok(());
+	}
+	with_write_lock(root.clone(), move || {
+		let mut args = vec!["add", "-A", "--"];
+		args.extend(paths.iter().map(String::as_str));
+		run_write(&root, &args, None)
+	})
+	.await
+}
+
+#[tauri::command]
+pub async fn unstage_paths(root: String, paths: Vec<String>) -> Result<(), String> {
+	if paths.is_empty() {
+		return Ok(());
+	}
+	with_write_lock(root.clone(), move || {
+		let mut args = vec!["restore", "--staged", "--"];
+		args.extend(paths.iter().map(String::as_str));
+		run_write(&root, &args, None)
+	})
+	.await
+}
+
+#[tauri::command]
+pub async fn apply_index_patch(root: String, patch: String) -> Result<(), String> {
+	if patch.trim().is_empty() {
+		return Ok(());
+	}
+	with_write_lock(root.clone(), move || {
+		// The patch goes in via stdin; `-` reads it. A patch whose context
+		// no longer matches fails here with git's own message.
+		run_write(
+			&root,
+			&["apply", "--cached", "--whitespace=nowarn", "-"],
+			Some(&patch),
+		)
+	})
+	.await
+}
+
+#[tauri::command]
+pub async fn commit(root: String, message: String) -> Result<(), String> {
+	with_write_lock(root.clone(), move || run_write(&root, &["commit", "-m", &message], None))
+		.await
 }
 
 #[cfg(test)]
@@ -781,8 +896,7 @@ mod tests {
 	}
 
 	/// Like fixture() but with a clean worktree (committed, nothing pending).
-	fn fixture_clean() -> std::path::PathBuf {
-		let dir = fixture();
+	fn fixture_clean() -> std::path::PathBuf {		let dir = fixture();
 		let out = Command::new("git")
 			.args(["stash", "-u"])
 			.current_dir(&dir)
@@ -794,5 +908,83 @@ mod tests {
 			.unwrap();
 		assert!(out.status.success());
 		dir
+	}
+
+	#[tokio::test]
+	async fn stage_unstage_round_trip() {
+		let dir = fixture();
+		let root = dir.to_str().unwrap().to_string();
+		stage_paths(root.clone(), vec!["f.txt".to_string()])
+			.await
+			.unwrap();
+		let status = git_status(root.clone()).await.unwrap();
+		assert!(status.contains("1 M.") && status.contains("f.txt"), "{status}");
+		unstage_paths(root.clone(), vec!["f.txt".to_string()])
+			.await
+			.unwrap();
+		let status = git_status(root).await.unwrap();
+		assert!(status.contains(".M"), "{status}");
+		// Empty path lists are no-ops, like the Bun adapter.
+		stage_paths("/tmp".to_string(), vec![]).await.unwrap();
+		unstage_paths("/tmp".to_string(), vec![]).await.unwrap();
+	}
+
+	#[tokio::test]
+	async fn apply_patch_round_trip() {
+		let dir = fixture();
+		let root = dir.to_str().unwrap().to_string();
+		// Capture the worktree diff, revert, re-apply to the index.
+		let id = git_diff_start(root.clone(), false, None, None)
+			.await
+			.unwrap();
+		let patch = git_diff_result(id).await.unwrap();
+		assert!(patch.contains("+two"));
+		run_git(&root, &["checkout", "--", "f.txt"]).unwrap();
+		apply_index_patch(root.clone(), patch).await.unwrap();
+		let status = git_status(root).await.unwrap();
+		// Index holds the change while the reverted worktree does not:
+		// staged-modified AND worktree-modified is the correct outcome.
+		assert!(status.contains("1 MM") && status.contains("f.txt"), "{status}");
+		// Blank patches are no-ops; bad patches surface git's message.
+		apply_index_patch("/tmp".to_string(), "  ".to_string())
+			.await
+			.unwrap();
+		let err = apply_index_patch("/tmp".to_string(), "bogus".to_string())
+			.await
+			.unwrap_err();
+		assert!(err.contains("git apply failed"), "{err}");
+	}
+
+	#[tokio::test]
+	async fn commit_records_message() {
+		let dir = fixture();
+		let root = dir.to_str().unwrap().to_string();
+		stage_paths(root.clone(), vec!["f.txt".to_string()])
+			.await
+			.unwrap();
+		commit(root.clone(), "m3 test commit".to_string())
+			.await
+			.unwrap();
+		let log = run_git(&root, &["log", "--format=%s", "-1"]).unwrap();
+		assert!(log.contains("m3 test commit"), "{log}");
+	}
+
+	#[tokio::test]
+	async fn concurrent_writes_all_succeed() {
+		let dir = fixture();
+		let root = dir.to_str().unwrap().to_string();
+		// Ten overlapping stage/unstage pairs through the per-repo lane:
+		// every op resolves, none interleaves the index into an error.
+		let mut handles = Vec::new();
+		for _ in 0..10 {
+			let root = root.clone();
+			handles.push(tokio::spawn(async move {
+				stage_paths(root.clone(), vec!["f.txt".to_string()]).await?;
+				unstage_paths(root, vec!["f.txt".to_string()]).await
+			}));
+		}
+		for handle in handles {
+			handle.await.expect("task panicked").unwrap();
+		}
 	}
 }

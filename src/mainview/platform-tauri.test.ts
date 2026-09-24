@@ -99,6 +99,10 @@ function stubBridge(): void {
 							]);
 						case "git_create_branch":
 						case "git_switch_branch":
+						case "stage_paths":
+						case "unstage_paths":
+						case "apply_index_patch":
+						case "commit":
 							return Promise.resolve(undefined);
 						case "git_worktree_paths":
 							return Promise.resolve("b.txt\0a.txt\0");
@@ -225,8 +229,27 @@ describe("platform-tauri (M1 bridge)", () => {
 		await expect(
 			platform.gitRemote("/r", "fetch", { remote: "origin" }),
 		).rejects.toThrow(/later migration unit/);
-		await expect(platform.commit("/r", "x")).rejects.toThrow(
+		await expect(platform.runGit("/r", ["status"])).rejects.toThrow(
 			/later migration unit/,
 		);
+	});
+
+	test("maps write ops to commands", async () => {
+		stubBridge();
+		calls.length = 0;
+		const platform = createTauriPlatform();
+		await platform.stagePaths("/r", ["a.txt"]);
+		await platform.unstagePaths("/r", ["a.txt"]);
+		await platform.applyIndexPatch("/r", "patch");
+		await platform.commit("/r", "msg");
+		expect(calls.map((c) => c.command)).toEqual([
+			"stage_paths",
+			"unstage_paths",
+			"apply_index_patch",
+			"commit",
+		]);
+		expect(calls[0].args).toMatchObject({ root: "/r", paths: ["a.txt"] });
+		expect(calls[2].args).toMatchObject({ root: "/r", patch: "patch" });
+		expect(calls[3].args).toMatchObject({ root: "/r", message: "msg" });
 	});
 });
