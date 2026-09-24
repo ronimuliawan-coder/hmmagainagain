@@ -249,7 +249,7 @@ fn log_argv(
 	}
 	let mut argv: Vec<String> = vec![
 		"log".to_string(),
-		"--format=%H\x1f%h\x1f%an\x1f%ae\x1f%aI\x1f%s\x1f%D\x00".to_string(),
+		"--format=%H%x1f%h%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%D%x00".to_string(),
 	];
 	if let Some(n) = limit {
 		argv.push(format!("--max-count={n}"));
@@ -293,32 +293,45 @@ pub async fn git_log_stream(
 		let mut reader = BufReader::new(stdout);
 		let mut count = 0;
 		let mut buf = Vec::new();
-		loop {
-			buf.clear();
-			let n = reader
-				.read_until(b'\0', &mut buf)
-				.map_err(|e| format!("read: {e}"))?;
-			if n == 0 {
-				break;
+		// Reap-before-return: every error below kills and waits first, or
+		// the child stays a zombie (review catch).
+		let mut drain = || -> Result<usize, String> {
+			loop {
+				buf.clear();
+				let n = reader
+					.read_until(b'\0', &mut buf)
+					.map_err(|e| format!("read: {e}"))?;
+				if n == 0 {
+					break;
+				}
+				let record = String::from_utf8_lossy(&buf);
+				let record = record.strip_prefix('\n').unwrap_or(&record);
+				if record.is_empty() {
+					continue;
+				}
+				if let Some(commit) = parse_log_record(record) {
+					count += 1;
+					emit_app
+						.emit(
+							"git-log-commit",
+							LogCommitEvent {
+								run_id: run_id.clone(),
+								commit,
+							},
+						)
+						.map_err(|e| format!("emit: {e}"))?;
+				}
 			}
-			let record = String::from_utf8_lossy(&buf);
-			let record = record.strip_prefix('\n').unwrap_or(&record);
-			if record.is_empty() {
-				continue;
+			Ok(count)
+		};
+		let count = match drain() {
+			Ok(count) => count,
+			Err(error) => {
+				let _ = child.kill();
+				let _ = child.wait();
+				return Err(error);
 			}
-			if let Some(commit) = parse_log_record(record) {
-				count += 1;
-				emit_app
-					.emit(
-						"git-log-commit",
-						LogCommitEvent {
-							run_id: run_id.clone(),
-							commit,
-						},
-					)
-					.map_err(|e| format!("emit: {e}"))?;
-			}
-		}
+		};
 		let status = child.wait().map_err(|e| format!("wait: {e}"))?;
 		Ok::<_, String>((count, status))
 	})
@@ -360,6 +373,9 @@ pub struct LogCommit {
 }
 
 pub fn parse_log_record(record: &str) -> Option<LogCommit> {
+	// read_until keeps the NUL terminator: strip it here so refs never
+	// ends in "\0" (truthy in JS, breaks empty-ref checks downstream).
+	let record = record.strip_suffix('\0').unwrap_or(record);
 	let mut fields = record.split('\x1f');
 	Some(LogCommit {
 		oid: fields.next()?.to_string(),
@@ -682,11 +698,15 @@ mod tests {
 
 	#[test]
 	fn log_argv_mirrors_the_bun_contract() {
+		let argv = log_argv(Some(50), Some(10), &Some("main".to_string())).unwrap();
+		// No raw control bytes: Command rejects NUL in argv, so the format
+		// must use git's %x placeholders (review catch).
+		assert!(argv.iter().all(|a| !a.contains('\0')));
 		assert_eq!(
-			log_argv(Some(50), Some(10), &Some("main".to_string())).unwrap(),
+			argv,
 			[
 				"log",
-				"--format=%H\x1f%h\x1f%an\x1f%ae\x1f%aI\x1f%s\x1f%D\x00",
+				"--format=%H%x1f%h%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%D%x00",
 				"--max-count=50",
 				"--skip=10",
 				"--no-color",
@@ -694,6 +714,14 @@ mod tests {
 			]
 		);
 		assert!(log_argv(None, None, &Some("--evil".to_string())).is_err());
+	}
+
+	#[test]
+	fn log_record_strips_the_nul_terminator() {
+		// read_until keeps the delimiter: refs must not end in "\0".
+		let record = "abc\x1fo\x1fJane\x1fj@x\x1f2026\x1fsubj\x1f\x00";
+		let commit = parse_log_record(record).unwrap();
+		assert_eq!(commit.refs, "");
 	}
 
 	#[test]

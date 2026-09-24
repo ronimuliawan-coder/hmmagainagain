@@ -146,6 +146,15 @@ export function createTauriPlatform(): Platform {
 			}
 			const runId = `${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6)}`;
 			return (async () => {
+				// Both listeners register BEFORE the stream starts: Tauri
+				// registration is async IPC, and a short stream could otherwise
+				// emit done while registration is still pending (review catch).
+				// The resolver is assigned synchronously so no event can land
+				// in a gap between registration and invoke.
+				let settleDone: ((count: number) => void) | null = null;
+				const done = new Promise<{ count: number }>((resolve) => {
+					settleDone = (count: number) => resolve({ count });
+				});
 				const offCommit = await backend.listen<TauriLogCommitEvent>(
 					"git-log-commit",
 					(event) => {
@@ -153,24 +162,18 @@ export function createTauriPlatform(): Platform {
 					},
 				);
 				let offDone: (() => void) | null = null;
-				const done = new Promise<{ count: number }>((resolve, reject) => {
-					backend
-						.listen<TauriLogDoneEvent>("git-log-done", (event) => {
-							if (event.payload.run_id === runId) {
-								resolve({ count: event.payload.count });
-							}
-						})
-						.then(
-							(off) => {
-								offDone = off;
-							},
-							(error: unknown) => {
-								reject(
-									error instanceof Error ? error : new Error(String(error)),
-								);
-							},
-						);
-				});
+				try {
+					offDone = await backend.listen<TauriLogDoneEvent>(
+						"git-log-done",
+						(event) => {
+							if (event.payload.run_id === runId)
+								settleDone?.(event.payload.count);
+						},
+					);
+				} catch (error) {
+					offCommit();
+					throw error instanceof Error ? error : new Error(String(error));
+				}
 				const cleanup = (): void => {
 					offCommit();
 					offDone?.();

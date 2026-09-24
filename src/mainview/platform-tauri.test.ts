@@ -108,20 +108,26 @@ function stubBridge(): void {
 				},
 			},
 			event: {
+				// Registrations settle asynchronously (like Tauri's IPC):
+				// the bridge must await them before invoking, or a short
+				// stream's done event lands with nobody listening.
 				listen: (
 					event: string,
 					handler: (payload: { payload: unknown }) => void,
-				) => {
-					const list = listeners.get(event) ?? [];
-					list.push(handler);
-					listeners.set(event, list);
-					return Promise.resolve(() => {
-						listeners.set(
-							event,
-							(listeners.get(event) ?? []).filter((h) => h !== handler),
-						);
-					});
-				},
+				) =>
+					new Promise<() => void>((resolve) => {
+						setTimeout(() => {
+							const list = listeners.get(event) ?? [];
+							list.push(handler);
+							listeners.set(event, list);
+							resolve(() => {
+								listeners.set(
+									event,
+									(listeners.get(event) ?? []).filter((h) => h !== handler),
+								);
+							});
+						}, 10);
+					}),
 			},
 		},
 	};
