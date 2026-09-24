@@ -26,8 +26,50 @@ concurrency:
 permissions: {}
 
 jobs:
+  # A push to a PR branch would otherwise run this workflow twice (push +
+  # pull_request events, same head). When an open PR already covers the
+  # branch, the PR run does the work and the push run stands down. Tiny
+  # github-hosted check; the heavy job keeps its Namespace runner.
+  dedupe:
+    name: skip push when a PR covers it
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      run-ci: ${{ steps.check.outputs.run-ci }}
+    steps:
+      - name: Check for an open PR on this branch
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != push ]; then
+            echo "run-ci=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          count="$(curl -fsSL -G \
+            --data-urlencode "head=${GITHUB_REPOSITORY_OWNER}:${GITHUB_REF_NAME}" \
+            --data-urlencode "state=open" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/pulls" \
+            | python3 -c 'import json,sys
+          try:
+              data = json.load(sys.stdin)
+              print(len(data) if isinstance(data, list) else -1)
+          except Exception:
+              print(-1)' || echo -1)"
+          # Fail open: an API blip must cost a duplicate run, never a
+          # silently skipped gate. curl failure yields count=-1 via ||.
+          if [ "${count:--1}" -ge 1 ]; then
+            echo "run-ci=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run-ci=true" >> "$GITHUB_OUTPUT"
+          fi
   gate-and-build:
     name: gate + Linux stable build
+    needs: dedupe
+    if: needs.dedupe.outputs.run-ci == 'true'
     runs-on:
       - nscloud-ubuntu-24.04-amd64-4x8-with-cache
       - nscloud-cache-size-20gb
