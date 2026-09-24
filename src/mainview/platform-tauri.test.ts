@@ -6,6 +6,7 @@ import { describe, expect, test } from "bun:test";
 import { createTauriPlatform, isTauri } from "./platform-tauri";
 
 const calls: { command: string; args?: Record<string, unknown> }[] = [];
+let remoteFail = false;
 
 const PORCELAIN =
 	[
@@ -104,6 +105,32 @@ function stubBridge(): void {
 						case "apply_index_patch":
 						case "commit":
 							return Promise.resolve(undefined);
+						case "git_remote_start": {
+							const id = nextId++;
+							emit("git-remote-line", {
+								op_id: id,
+								client_token: args?.clientToken,
+								line: "fetching\n",
+							});
+							return Promise.resolve(id);
+						}
+						case "git_remote_result": {
+							if (remoteFail) {
+								return Promise.resolve({ ok: false, stderr: "nope" });
+							}
+							return Promise.resolve({ ok: true, stderr: "done" });
+						}
+						case "git_remote_abort":
+							return Promise.resolve(undefined);
+						case "watch_start": {
+							const watchId = args?.watchId as string;
+							emit("fs-events", { watch_id: watchId, paths: ["a.txt"] });
+							return Promise.resolve(undefined);
+						}
+						case "watch_stop":
+							return Promise.resolve(undefined);
+						case "plugin:dialog|open":
+							return Promise.resolve("/picked");
 						case "git_worktree_paths":
 							return Promise.resolve("b.txt\0a.txt\0");
 						default:
@@ -223,12 +250,61 @@ describe("platform-tauri (M1 bridge)", () => {
 		).toMatchObject({ root: "/r", name: "main" });
 	});
 
+	test("streams remote progress and maps watch + picker", async () => {
+		stubBridge();
+		calls.length = 0;
+		remoteFail = false;
+		const platform = createTauriPlatform();
+		const lines: string[] = [];
+		const result = await platform.gitRemote(
+			"/r",
+			"fetch",
+			{ remote: "origin" },
+			(line) => lines.push(line),
+		);
+		expect(result).toEqual({ ok: true, stderr: "done" });
+		expect(lines).toEqual(["fetching\n"]);
+		expect(
+			calls.find((c) => c.command === "git_remote_start")?.args,
+		).toMatchObject({ root: "/r", op: "fetch", remote: "origin" });
+
+		remoteFail = true;
+		try {
+			await expect(
+				platform.gitRemote("/r", "push", { remote: "origin" }),
+			).rejects.toThrow("nope");
+		} finally {
+			remoteFail = false;
+		}
+
+		const batches: string[][] = [];
+		const watcher = await platform.watchRepo("/r", (batch) =>
+			batches.push(batch.paths),
+		);
+		expect(batches).toEqual([["a.txt"]]);
+		expect(calls.find((c) => c.command === "watch_start")?.args).toMatchObject({
+			root: "/r",
+		});
+		await watcher.stop();
+		expect(calls.some((c) => c.command === "watch_stop")).toBe(true);
+
+		await expect(platform.pickDirectory()).resolves.toBe("/picked");
+		// Dialog options travel nested under `options` (plugin guest-js
+		// contract); the return is the bare selection, no {Folder} wrap.
+		expect(calls.find((c) => c.command === "plugin:dialog|open")?.args).toEqual(
+			{
+				options: { directory: true, multiple: false },
+			},
+		);
+	});
+
 	test("unowned units reject with a pointer", async () => {
 		stubBridge();
 		const platform = createTauriPlatform();
-		await expect(
-			platform.gitRemote("/r", "fetch", { remote: "origin" }),
-		).rejects.toThrow(/later migration unit/);
+		// gitRemote graduated to owned in M4; runGit stays unowned until M6.
+		await expect(platform.runGit("/r", ["status"])).rejects.toThrow(
+			/later migration unit/,
+		);
 		await expect(platform.runGit("/r", ["status"])).rejects.toThrow(
 			/later migration unit/,
 		);
