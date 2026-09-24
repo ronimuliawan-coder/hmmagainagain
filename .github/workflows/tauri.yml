@@ -156,13 +156,12 @@ jobs:
     needs: dedupe
     if: needs.dedupe.outputs.run-ci == 'true'
     runs-on:
-      # Minimal label set on purpose: mirror/git-mirror/cache labels are
-      # proven on Linux only; an unrecognized label can leave the job
-      # unscheduled with no log to read. No -with-cache suffix either: it
-      # pairs with a cache volume, and Windows gets none until cache
-      # support there is verified (first revision had the suffix and never
-      # scheduled — that pairing is the prime suspect).
-      - nscloud-windows-2022-amd64-4x8
+      # GitHub-hosted, deliberately: nscloud-windows-2022-amd64-4x8 (with
+      # and without -with-cache) never scheduled — no log, no error, ~20
+      # min queued. Either the workspace lacks Windows entitlement or the
+      # label is wrong; owner to confirm on the Namespace dashboard.
+      # Revisit to Namespace-native once Windows runners pick up jobs.
+      - windows-latest
     permissions:
       contents: read
     steps:
