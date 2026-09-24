@@ -17,7 +17,11 @@ pub fn run() {
 			git::git_worktree_paths,
 			git::git_diff_start,
 			git::git_diff_abort,
-			git::git_diff_result
+			git::git_diff_result,
+			git::git_log_stream,
+			git::git_branches,
+			git::git_create_branch,
+			git::git_switch_branch
 		])
 		.run(tauri::generate_context!())
 		.expect("error while running tauri application");

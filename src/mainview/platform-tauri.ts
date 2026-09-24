@@ -1,17 +1,19 @@
-// Tauri Platform (M1, RON-400): the Platform contract over Tauri invoke,
-// beside the Electrobun RPC bridge. M1 covers the read slice that renders
-// status/tree/diff; parsing reuses the existing pure TS parsers (M2 ports
-// them to Rust with fixture oracles). Everything else rejects until its
-// owning unit lands. No Electrobun imports — this module loads in any
-// webview where window.__TAURI__ exists.
+// Tauri Platform (M1–M2): the Platform contract over Tauri invoke, beside
+// the Electrobun RPC bridge. Reads + branch ops are live; parsing of the
+// streamed log happens in Rust (the stream demands it), everything else
+// reuses the existing pure TS parsers. Unowned units reject until they
+// land. No Electrobun imports — this module loads in any webview where
+// window.__TAURI__ exists.
 
 import { parsePatchStats } from "../bun/git/diff";
 import { parseStatusV2 } from "../bun/git/status-parser";
 import type {
+	BranchInfo,
 	DiffResult,
 	FsEventBatch,
 	GitDiffOptions,
 	GitStatus,
+	LogCommit,
 	Platform,
 	RepoInfo,
 } from "../shared/platform";
@@ -21,6 +23,12 @@ declare global {
 		__TAURI__?: {
 			core: {
 				invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
+			};
+			event: {
+				listen<T>(
+					event: string,
+					handler: (payload: { payload: T }) => void,
+				): Promise<() => void>;
 			};
 		};
 	}
@@ -45,6 +53,16 @@ function invoke<T>(
 interface TauriRepoInfo {
 	branch: string;
 	head: string;
+}
+
+interface TauriLogCommitEvent {
+	run_id: string;
+	commit: LogCommit;
+}
+
+interface TauriLogDoneEvent {
+	run_id: string;
+	count: number;
 }
 
 function toDiffResult(patch: string): DiffResult {
@@ -117,10 +135,74 @@ export function createTauriPlatform(): Platform {
 					.sort(),
 			),
 
-		gitLog: () => notYet("gitLog"),
-		gitBranches: () => notYet("gitBranches"),
-		gitCreateBranch: () => notYet("gitCreateBranch"),
-		gitSwitchBranch: () => notYet("gitSwitchBranch"),
+		gitLog: (
+			root: string,
+			options: { limit?: number; skip?: number; range?: string },
+			onCommit: (commit: LogCommit) => void,
+		): Promise<{ count: number }> => {
+			const backend = window.__TAURI__?.event;
+			if (!backend) {
+				return Promise.reject(new Error("tauri: event bridge unavailable"));
+			}
+			const runId = `${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6)}`;
+			return (async () => {
+				const offCommit = await backend.listen<TauriLogCommitEvent>(
+					"git-log-commit",
+					(event) => {
+						if (event.payload.run_id === runId) onCommit(event.payload.commit);
+					},
+				);
+				let offDone: (() => void) | null = null;
+				const done = new Promise<{ count: number }>((resolve, reject) => {
+					backend
+						.listen<TauriLogDoneEvent>("git-log-done", (event) => {
+							if (event.payload.run_id === runId) {
+								resolve({ count: event.payload.count });
+							}
+						})
+						.then(
+							(off) => {
+								offDone = off;
+							},
+							(error: unknown) => {
+								reject(
+									error instanceof Error ? error : new Error(String(error)),
+								);
+							},
+						);
+				});
+				const cleanup = (): void => {
+					offCommit();
+					offDone?.();
+				};
+				try {
+					await invoke<number>("git_log_stream", {
+						root,
+						runId,
+						limit: options.limit ?? null,
+						skip: options.skip ?? null,
+						range: options.range ?? null,
+					});
+					return await done;
+				} finally {
+					cleanup();
+				}
+			})();
+		},
+		gitBranches: (root: string): Promise<BranchInfo[]> =>
+			invoke<BranchInfo[]>("git_branches", { root }),
+		gitCreateBranch: (
+			root: string,
+			name: string,
+			switchTo?: boolean,
+		): Promise<void> =>
+			invoke<void>("git_create_branch", {
+				root,
+				name,
+				switchTo: switchTo ?? false,
+			}).then(() => undefined),
+		gitSwitchBranch: (root: string, name: string): Promise<void> =>
+			invoke<void>("git_switch_branch", { root, name }).then(() => undefined),
 		gitRemote: () => notYet("gitRemote"),
 		stagePaths: () => notYet("stagePaths"),
 		unstagePaths: () => notYet("unstagePaths"),
