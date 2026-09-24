@@ -158,8 +158,11 @@ jobs:
     runs-on:
       # Minimal label set on purpose: mirror/git-mirror/cache labels are
       # proven on Linux only; an unrecognized label can leave the job
-      # unscheduled with no log to read. Add them once green.
-      - nscloud-windows-2022-amd64-4x8-with-cache
+      # unscheduled with no log to read. No -with-cache suffix either: it
+      # pairs with a cache volume, and Windows gets none until cache
+      # support there is verified (first revision had the suffix and never
+      # scheduled — that pairing is the prime suspect).
+      - nscloud-windows-2022-amd64-4x8
     permissions:
       contents: read
     steps:
