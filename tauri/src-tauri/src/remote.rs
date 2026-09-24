@@ -118,6 +118,11 @@ pub async fn git_remote_start(
 		child
 			.args(&argv)
 			.current_dir(&spawn_root)
+			// Never inherit the terminal: like the Bun adapter (piped
+			// stdin, closed), a credential prompt must fail fast instead
+			// of hanging the transfer uninterruptibly.
+			.env("GIT_TERMINAL_PROMPT", "0")
+			.stdin(std::process::Stdio::null())
 			.stdout(std::process::Stdio::null())
 			.stderr(std::process::Stdio::piped());
 		child.spawn().map_err(|e| format!("spawn: {e}"))
@@ -137,10 +142,17 @@ pub async fn git_remote_start(
 
 #[tauri::command]
 pub async fn git_remote_abort(op_id: u64) -> Result<(), String> {
-	let mut registry = registry().lock().map_err(|e| format!("lock: {e}"))?;
-	if let Some(mut run) = registry.runs.remove(&op_id) {
-		// Best effort: the child may already be gone.
+	let run = registry()
+		.lock()
+		.map_err(|e| format!("lock: {e}"))?
+		.runs
+		.remove(&op_id);
+	if let Some(mut run) = run {
+		// Best effort: the child may already be gone. Reap the killed
+		// child here — result() (already draining) observes EOF and
+		// reports the op as aborted, so nobody else waits on it.
 		let _ = run.child.kill();
+		let _ = run.child.wait();
 	}
 	Ok(())
 }
@@ -150,38 +162,42 @@ pub async fn git_remote_result(
 	app: tauri::AppHandle,
 	op_id: u64,
 ) -> Result<RemoteOutcome, String> {
-	let run = registry()
-		.lock()
-		.map_err(|e| format!("lock: {e}"))?
-		.runs
-		.remove(&op_id)
-		.ok_or_else(|| "unknown or aborted remote op".to_string())?;
-	let lane = write_lock_lane(&run.root);
-	let token = run.token;
-	let mut child = run.child;
+	// Take only stderr under the registry lock; the run stays registered
+	// while the transfer drains so a racing abort can still find the
+	// child and kill it (aborting an already-removed run is a no-op Ok).
+	let (root, token, mut stderr) = {
+		let mut reg = registry().lock().map_err(|e| format!("lock: {e}"))?;
+		let run = reg
+			.runs
+			.get_mut(&op_id)
+			.ok_or_else(|| "unknown or aborted remote op".to_string())?;
+		let stderr = run.child.stderr.take().ok_or("stderr unavailable")?;
+		(run.root.clone(), run.token.clone(), stderr)
+	};
 	let outcome = tauri::async_runtime::spawn_blocking(move || {
-		let _held = lane.lock().unwrap_or_else(|e| e.into_inner());
-		let stderr = child.stderr.take().ok_or("stderr unavailable")?;
-		let mut reader = std::io::BufReader::new(stderr);
+		// Drain WITHOUT the write lane: the transfer body runs
+		// concurrently with later writes (documented scope above); only
+		// completion serializes below. Chunk reads split on \r|\n at the
+		// byte level so live \r progress reaches the UI as it arrives
+		// instead of bunching at phase end; only complete lines decode,
+		// keeping UTF-8 sequences split across chunks intact.
 		let mut full = String::new();
-		let mut rest = String::new();
-		let mut buf = Vec::new();
+		let mut pending: Vec<u8> = Vec::new();
+		let mut chunk = [0u8; 4096];
 		loop {
-			use std::io::BufRead;
-			buf.clear();
-			let n = reader
-				.read_until(b'\n', &mut buf)
-				.map_err(|e| format!("read: {e}"))?;
+			use std::io::Read;
+			let n = stderr.read(&mut chunk).map_err(|e| format!("read: {e}"))?;
 			if n == 0 {
 				break;
 			}
-			rest.push_str(&String::from_utf8_lossy(&buf));
-			// Git progress uses \r as well as \n over pipes.
-			let mut parts: Vec<String> =
-				rest.split(['\r', '\n']).map(str::to_string).collect();
-			rest = parts.pop().unwrap_or_default();
-			for line in &parts {
-				full.push_str(line);
+			pending.extend_from_slice(&chunk[..n]);
+			while let Some(pos) =
+				pending.iter().position(|b| *b == b'\r' || *b == b'\n')
+			{
+				let raw: Vec<u8> = pending.drain(..=pos).collect();
+				let line =
+					String::from_utf8_lossy(&raw[..raw.len() - 1]).into_owned();
+				full.push_str(&line);
 				full.push('\n');
 				let _ = app.emit(
 					"git-remote-line",
@@ -193,7 +209,8 @@ pub async fn git_remote_result(
 				);
 			}
 		}
-		if !rest.is_empty() {
+		if !pending.is_empty() {
+			let rest = String::from_utf8_lossy(&pending).into_owned();
 			full.push_str(&rest);
 			let _ = app.emit("git-remote-line", RemoteLineEvent {
 				op_id,
@@ -201,7 +218,18 @@ pub async fn git_remote_result(
 				line: rest,
 			});
 		}
-		let status = child.wait().map_err(|e| format!("wait: {e}"))?;
+		// Completion serializes on the repo's write lane; then remove
+		// ourselves. If abort won the race the entry is already gone and
+		// the op reports as aborted (abort reaped the child).
+		let lane = write_lock_lane(&root);
+		let _held = lane.lock().unwrap_or_else(|e| e.into_inner());
+		let mut run = registry()
+			.lock()
+			.map_err(|e| format!("lock: {e}"))?
+			.runs
+			.remove(&op_id)
+			.ok_or_else(|| "remote op aborted".to_string())?;
+		let status = run.child.wait().map_err(|e| format!("wait: {e}"))?;
 		Ok::<_, String>((status, full))
 	})
 	.await

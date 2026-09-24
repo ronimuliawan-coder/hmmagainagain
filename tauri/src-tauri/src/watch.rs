@@ -98,6 +98,13 @@ pub async fn watch_start(
 	let mut watcher =
 		notify::RecommendedWatcher::new(tx, notify::Config::default())
 			.map_err(|e| format!("watch: {e}"))?;
+	// Resolve symlinks up front (/private/var on macOS, symlinked
+	// checkouts): backends report resolved paths, so watching and
+	// stripping against the unresolved root would silence every event.
+	// Fall back to the raw root when it does not resolve (yet).
+	let root = std::fs::canonicalize(&root)
+		.map(|p| p.to_string_lossy().into_owned())
+		.unwrap_or(root);
 	watcher
 		.watch(Path::new(&root), notify::RecursiveMode::Recursive)
 		.map_err(|e| format!("watch: {e}"))?;

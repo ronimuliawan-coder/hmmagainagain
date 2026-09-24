@@ -81,10 +81,6 @@ interface TauriFsEventsEvent {
 	paths: string[];
 }
 
-interface TauriDialogOpen {
-	Folder?: string | null;
-}
-
 function toDiffResult(patch: string): DiffResult {
 	return { patch, files: parsePatchStats(patch) };
 }
@@ -100,11 +96,17 @@ export function createTauriPlatform(): Platform {
 				head: info.head,
 			})),
 
+		// Directory pick via the dialog plugin. Its `open` command takes
+		// options nested under `options` and returns the bare selection
+		// (string | null for a single pick — the Rust OpenResponse is an
+		// untagged enum, so there is no {Folder} wrapper on the wire).
 		pickDirectory: (): Promise<string | null> =>
-			invoke<TauriDialogOpen>("plugin:dialog|open", {
-				directory: true,
-				multiple: false,
-			}).then((response) => response.Folder ?? null),
+			invoke<string | null>("plugin:dialog|open", {
+				options: {
+					directory: true,
+					multiple: false,
+				},
+			}),
 
 		runGit: () => notYet("runGit"),
 

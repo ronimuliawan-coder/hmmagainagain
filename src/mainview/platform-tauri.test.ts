@@ -130,7 +130,7 @@ function stubBridge(): void {
 						case "watch_stop":
 							return Promise.resolve(undefined);
 						case "plugin:dialog|open":
-							return Promise.resolve({ Folder: "/picked" });
+							return Promise.resolve("/picked");
 						case "git_worktree_paths":
 							return Promise.resolve("b.txt\0a.txt\0");
 						default:
@@ -289,6 +289,13 @@ describe("platform-tauri (M1 bridge)", () => {
 		expect(calls.some((c) => c.command === "watch_stop")).toBe(true);
 
 		await expect(platform.pickDirectory()).resolves.toBe("/picked");
+		// Dialog options travel nested under `options` (plugin guest-js
+		// contract); the return is the bare selection, no {Folder} wrap.
+		expect(calls.find((c) => c.command === "plugin:dialog|open")?.args).toEqual(
+			{
+				options: { directory: true, multiple: false },
+			},
+		);
 	});
 
 	test("unowned units reject with a pointer", async () => {
