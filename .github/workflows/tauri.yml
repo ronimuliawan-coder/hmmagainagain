@@ -1,6 +1,8 @@
-# Tauri sidecar CI (RON-397 M0): Linux release bundle for tauri/, path-gated
-# so product CI stays fast. Same Namespace runner shape as product.yml.
-# Ubuntu-only (Windows/macOS arrive in M5).
+# Tauri sidecar CI (RON-397 M0, matrix in RON-402 M5): release bundles for
+# tauri/, path-gated so product CI stays fast. Linux is the warm, cached
+# lane; Windows/macOS prove the packaging matrix (cold builds for now —
+# the nscloud cache action only supports Linux/macOS mounts, and Windows
+# support is unverified, so no cache volume rides those jobs yet).
 
 name: tauri
 
@@ -148,3 +150,143 @@ jobs:
             echo "no bundle artifact found"
             exit 1
           fi
+
+  bundle-windows:
+    name: bundle Windows release
+    needs: dedupe
+    if: needs.dedupe.outputs.run-ci == 'true'
+    runs-on:
+      # Minimal label set on purpose: mirror/git-mirror/cache labels are
+      # proven on Linux only; an unrecognized label can leave the job
+      # unscheduled with no log to read. Add them once green.
+      - nscloud-windows-2022-amd64-4x8-with-cache
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node + Rust
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: tauri/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify Rust toolchain
+        run: cargo --version && rustc --version
+
+      - name: Install frontend dependencies
+        working-directory: tauri
+        run: npm ci
+
+      - name: Build bundle
+        # Same CI-only profile relief as Linux; shipped profile untouched.
+        # WebView2/WiX/NSIS come with the runner image or are fetched by
+        # tauri-bundler — no setup step until a red run says otherwise.
+        env:
+          CARGO_PROFILE_RELEASE_LTO: "false"
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "4"
+        working-directory: tauri
+        run: npx tauri build
+
+      - name: Report bundle
+        # node, not shell globs: this step must run unchanged on pwsh.
+        working-directory: tauri
+        run: >-
+          node --input-type=module -e "
+          import { readdirSync, statSync, existsSync } from 'node:fs';
+          import { join } from 'node:path';
+          const root = 'src-tauri/target/release/bundle';
+          const found = [];
+          const walk = (dir) => {
+            for (const entry of readdirSync(dir, { withFileTypes: true })) {
+              const full = join(dir, entry.name);
+              if (entry.isDirectory()) walk(full);
+              else if (/hmmagainagain/i.test(entry.name)) found.push(full);
+            }
+          };
+          if (existsSync(root)) walk(root);
+          if (!found.length) { console.error('no bundle artifact found'); process.exit(1); }
+          for (const f of found) {
+            const bytes = statSync(f).size;
+            console.log(`bundle=${f} bytes=${bytes} (${(bytes / 1024 / 1024).toFixed(1)} MiB)`);
+          }"
+
+  bundle-macos:
+    name: bundle macOS release
+    needs: dedupe
+    if: needs.dedupe.outputs.run-ci == 'true'
+    runs-on:
+      - nscloud-macos-sequoia-arm64-6x14-with-cache
+      - nscloud-cache-size-20gb
+      # macOS gets its own volume: target/ is not portable across OSes.
+      - nscloud-cache-tag-hmmagainagain-tauri-macos
+      - nscloud-cache-allow-commit-from-migration/tauri
+      - nscloud-cache-allow-commit-from-dev
+      - nscloud-cache-allow-commit-from-master
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node + Rust
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: tauri/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build artifacts
+        # Same never-cache-~/.cargo rule as Linux (a mount would shadow
+        # the just-installed toolchain). Unsigned build: no Apple
+        # credentials needed to produce the .dmg, only to notarize it.
+        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1
+        with:
+          path: |
+            ~/.cargo/registry
+            tauri/src-tauri/target
+
+      - name: Verify Rust toolchain
+        run: cargo --version && rustc --version
+
+      - name: Install frontend dependencies
+        working-directory: tauri
+        run: npm ci
+
+      - name: Build bundle
+        # Same CI-only profile relief as Linux; shipped profile untouched.
+        env:
+          CARGO_PROFILE_RELEASE_LTO: "false"
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "4"
+        working-directory: tauri
+        run: npx tauri build
+
+      - name: Report bundle
+        working-directory: tauri
+        run: >-
+          node --input-type=module -e "
+          import { readdirSync, statSync, existsSync } from 'node:fs';
+          import { join } from 'node:path';
+          const root = 'src-tauri/target/release/bundle';
+          const found = [];
+          const walk = (dir) => {
+            for (const entry of readdirSync(dir, { withFileTypes: true })) {
+              const full = join(dir, entry.name);
+              if (entry.isDirectory()) walk(full);
+              else if (/hmmagainagain/i.test(entry.name)) found.push(full);
+            }
+          };
+          if (existsSync(root)) walk(root);
+          if (!found.length) { console.error('no bundle artifact found'); process.exit(1); }
+          for (const f of found) {
+            const bytes = statSync(f).size;
+            console.log(`bundle=${f} bytes=${bytes} (${(bytes / 1024 / 1024).toFixed(1)} MiB)`);
+          }"
