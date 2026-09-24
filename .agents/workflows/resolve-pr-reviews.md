@@ -37,7 +37,7 @@ Parse `$ARGUMENTS`:
 ### 1.2 Wait for Reviewer Quiescence (Settle Window)
 Check the status of all automated reviewer suites for the PR's head commit:
 ```bash
-node .agents/skills/pr-review-remediation/scripts/pr_review_tools.js suites <commit_sha>
+node .agents/skills/pr-review-remediation/scripts/pr_review_tools.cjs suites <commit_sha>
 ```
 
 - **If `allCompleted: false`**:
@@ -57,7 +57,7 @@ node .agents/skills/pr-review-remediation/scripts/pr_review_tools.js suites <com
 
 Fetch all review data across all PR entry points:
 ```bash
-node .agents/skills/pr-review-remediation/scripts/pr_review_tools.js fetch <pr_number>
+node .agents/skills/pr-review-remediation/scripts/pr_review_tools.cjs fetch <pr_number>
 ```
 
 Parse and organize findings across all 5 surfaces:
@@ -130,11 +130,11 @@ For every review thread:
 1. **Post Attributed Reply**:
    - For valid issues that were fixed:
      ```bash
-     node .agents/skills/pr-review-remediation/scripts/pr_review_tools.js reply <pr_number> <comment_id> "Verified and fixed: <explanation of fix applied>"
+     node .agents/skills/pr-review-remediation/scripts/pr_review_tools.cjs reply <pr_number> <comment_id> "Verified and fixed: <explanation of fix applied>"
      ```
    - For false positives or out-of-scope feedback:
      ```bash
-     node .agents/skills/pr-review-remediation/scripts/pr_review_tools.js reply <pr_number> <comment_id> "Technical rebuttal: <code-backed architectural explanation>"
+     node .agents/skills/pr-review-remediation/scripts/pr_review_tools.cjs reply <pr_number> <comment_id> "Technical rebuttal: <code-backed architectural explanation>"
      ```
    *(The script automatically appends the `- AG-Ron` sign-off signature at the bottom).*
 
