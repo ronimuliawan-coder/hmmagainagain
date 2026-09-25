@@ -19,6 +19,12 @@ const STATUS_SLUGS: Record<string, string> = {
 export const statusSlug = (letter: string): string =>
 	STATUS_SLUGS[letter] ?? "other";
 
+/** True when the index letter means "will commit": untracked (?) and ignored
+ * (!) entries are worktree-only — grouping or counting them as staged
+ * misrepresents state and arms bulk-unstage against paths git rejects. */
+export const isStagedStatus = (letter: string): boolean =>
+	letter !== "." && letter !== "?" && letter !== "!";
+
 export interface StatusListEntry {
 	path: string;
 	indexStatus: string;
@@ -134,7 +140,7 @@ export function renderStatusList(
 		return;
 	}
 	const unstaged = entries.filter((e) => e.worktreeStatus !== ".");
-	const staged = entries.filter((e) => e.indexStatus !== ".");
+	const staged = entries.filter((e) => isStagedStatus(e.indexStatus));
 	if (unstaged.length > 0) {
 		list.append(
 			buildGroupHeader(

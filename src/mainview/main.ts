@@ -19,7 +19,7 @@ import { buildStagedPatch } from "./patch-surgery";
 import { getPlatform, isTauri } from "./platform";
 import { enableSmoothWheel } from "./smooth-wheel";
 import { staticTheme } from "./static-themes";
-import { renderStatusList } from "./status-list";
+import { isStagedStatus, renderStatusList } from "./status-list";
 import { createStore } from "./store";
 import {
 	cycleThemeVariant,
@@ -227,8 +227,8 @@ function render(state: AppState): void {
 	}
 	if (state.info && state.status) renderRepoInfo(state.info, state.status);
 	if (state.status) {
-		const staged = state.status.entries.filter(
-			(e) => e.indexStatus !== ".",
+		const staged = state.status.entries.filter((e) =>
+			isStagedStatus(e.indexStatus),
 		).length;
 		stagedCount.textContent = `${staged} staged`;
 		commitBtn.disabled = staged === 0;
@@ -451,7 +451,9 @@ async function runBulkWrite(
 	const { root } = store.get();
 	if (!root) return;
 	const paths = entries
-		.filter((e) => (unstage ? e.indexStatus !== "." : e.worktreeStatus !== "."))
+		.filter((e) =>
+			unstage ? isStagedStatus(e.indexStatus) : e.worktreeStatus !== ".",
+		)
 		.map((e) => e.path);
 	if (paths.length === 0) return;
 	try {

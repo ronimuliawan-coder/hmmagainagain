@@ -33,38 +33,20 @@ jobs:
     name: skip push when a PR covers it
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pull-requests: read
     outputs:
       run-ci: ${{ steps.check.outputs.run-ci }}
     steps:
-      - name: Check for an open PR on this branch
-        id: check
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          if [ "$GITHUB_EVENT_NAME" != push ]; then
-            echo "run-ci=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          count="$(curl -fsSL --max-time 30 -G \
-            --data-urlencode "head=${GITHUB_REPOSITORY_OWNER}:${GITHUB_REF_NAME}" \
-            --data-urlencode "state=open" \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/pulls" \
-            | python3 -c 'import json,sys
-          try:
-              data = json.load(sys.stdin)
-              print(len(data) if isinstance(data, list) else -1)
-          except Exception:
-              print(-1)' || echo -1)"
-          # Fail open: an API blip must cost a duplicate run, never a
-          # silently skipped gate. curl failure yields count=-1 via ||.
-          if [ "${count:--1}" -ge 1 ]; then
-            echo "run-ci=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "run-ci=true" >> "$GITHUB_OUTPUT"
-          fi
+      # Local action: the repo must be present first (sparse: just this).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions/pr-dedupe
+      - id: check
+        uses: ./.github/actions/pr-dedupe
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
   gate-and-build:
     name: gate (tsc + biome + bun test)
     needs: dedupe
@@ -102,3 +84,9 @@ jobs:
 
       - name: Gate (tsc + biome + bun test)
         run: bun run check
+
+      - name: Build web UI
+        # Cheap shell-proof: the Tauri matrix only rebuilds the UI when
+        # tauri/ changes, so a UI-only breakage would otherwise go
+        # unnoticed until a tauri-touching PR. This catches it on every PR.
+        run: bun run build:web
