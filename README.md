@@ -4,40 +4,44 @@ A lightweight, fast, cross-platform (Linux / Windows / macOS) desktop git client
 diffshub-grade diff and tree UX — built on Pierre's open-source `@pierre/diffs` and
 `@pierre/trees` components, fully local, host-agnostic.
 
-**Status:** Unit 0 (scaffold & toolchain proof) — see the Linear project "hmmagainagain"
+**Status:** Tauri cutover (M6) — the shell is Tauri 2, the git engine is Rust
+commands over subprocess `git`. See the Linear project "hmmagainagain"
 for the tracker, Evidence Log, and approved PRD.
 
 ## Stack
 
-Electrobun 2.0.1 (Bun main process) · vanilla TypeScript + Vite 6 · subprocess `git` ·
-`@pierre/diffs` + `@pierre/trees` (from the diff-view/tree units onward).
-Decision record: [docs/decisions/ADR-0001-stack.md](docs/decisions/ADR-0001-stack.md).
+Tauri 2 (Rust core + system webview) · vanilla TypeScript + Vite 6 · subprocess `git` ·
+`@pierre/diffs` + `@pierre/trees`.
+Decision record: [docs/decisions/ADR-0003-tauri-cutover.md](docs/decisions/ADR-0003-tauri-cutover.md)
+(supersedes ADR-0001/ADR-0002 on the runtime).
 
 ## Layout map
 
 | Path | Role |
 |---|---|
-| `src/bun/` | Main process (Bun): window shell now; GitAdapter + fs watcher from U1/U2 |
+| `src/shared/` | Platform contract + fake fixture + engine-agnostic git parsers |
 | `src/mainview/` | Webview UI (vanilla TS + Vite): repo tree, status, diff views |
+| `tauri/` | Tauri shell (Rust commands, packaging matrix, soundcheck harness) |
 | `docs/GOVERNANCE.md` | Authority order, unit gates, ownership map |
 | `docs/GIT_WORKFLOW.md` | Branch/merge rules and invariants |
 | `docs/runbooks/` | Recovery + GitLab replica runbooks |
 | `docs/decisions/` | Architecture decision records |
 | `.claude/PRPs/` | Approved PRD (`prds/`) and unit plans (`plans/`) |
 | `AGENTS.md` | Binding agent rules (constitution) |
-| `electrobun.config.ts` / `hutch.config.ts` | Build/toolchain configuration (version pins) |
+| `tauri/src-tauri/` | Rust core (git commands, watcher) + bundling config |
 
 ## Commands
 
 ```bash
-bun run install:deps   # hutch install (respects hutch.lock)
+bun run install:deps   # bun install (frozen lockfile)
 bun run check          # typecheck + lint + tests
-bun run dev            # run the app with watch
-bun run build          # production build (hutch electrobun build)
+bun run dev            # web UI with HMR (browser, fake platform)
+bun run build          # web UI production build (dist/, served by Tauri)
 ```
 
-Requires the hutch toolchain (`~/.hutch/bin/hutch`, npm-forwarder for Electrobun 2.0.1) and
+Requires bun 1.4.0, a stable Rust toolchain (rustup), node 24, and
 Linux webkit2gtk-4.1 (present on Arch/EndeavourOS via `webkit2gtk` package).
+Ship bundles via the `tauri` CI workflow (Linux/macOS/Windows matrix).
 
 ## Quality budgets
 

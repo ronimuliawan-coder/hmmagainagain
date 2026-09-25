@@ -11,19 +11,16 @@
 		"check": "bun run typecheck && bun run lint && bun run test",
 		"build:web": "vite build",
 		"install:deps": "bun install",
-		"dev": "electrobun dev",
-		"predev": "bun run build:web",
-		"build": "electrobun build"
+		"dev": "vite",
+		"build": "vite build"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.12",
 		"@types/bun": "latest",
 		"@types/jsdom": "^30.0.0",
-		"concurrently": "^9.1.0",
 		"jsdom": "^30.0.1",
 		"typescript": "^5.7.2",
-		"vite": "^6.0.3",
-		"electrobun": "2.0.1"
+		"vite": "^6.0.3"
 	},
 	"dependencies": {
 		"@pierre/diffs": "1.3.6",
