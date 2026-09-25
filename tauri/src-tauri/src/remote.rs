@@ -388,6 +388,20 @@ mod tests {
 			.success()
 		);
 		assert_eq!(git(&second, &["rev-parse", "HEAD"]).stdout, head);
+		// Advance the origin, then pull for real: the ff-only argv must
+		// fast-forward the second clone onto the new commit.
+		std::fs::write(work.join("b.txt"), "two\n").unwrap();
+		assert!(git(&work, &["add", "-A"]).status.success());
+		assert!(git(&work, &["commit", "-qm", "second"]).status.success());
+		let push_argv =
+			op_argv("push", "origin", &Some("main".to_string()), false).unwrap();
+		assert!(run_argv(&work, &push_argv));
+		let pull_argv = op_argv("pull", "origin", &None, false).unwrap();
+		assert!(run_argv(&second, &pull_argv));
+		assert_eq!(
+			git(&second, &["rev-parse", "HEAD"]).stdout,
+			git(&work, &["rev-parse", "HEAD"]).stdout
+		);
 	}
 
 	#[test]
