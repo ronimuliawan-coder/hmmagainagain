@@ -1,0 +1,38 @@
+/* Soundcheck page chrome. Component internals come from the Pierre
+ * stylesheets; this file only paints the page around them from the same
+ * theme tokens the harness sets (with static fallbacks so a theming
+ * failure is visible as wrong colors, never as an unstyled page). */
+:root {
+	color-scheme: light dark;
+}
+
+:root[data-theme="dark"] {
+	--soundcheck-bg: #0a0a0a;
+	--soundcheck-fg: #fafafa;
+}
+
+:root[data-theme="light"] {
+	--soundcheck-bg: #fafafa;
+	--soundcheck-fg: #0a0a0a;
+}
+
+body {
+	margin: 0;
+	background-color: var(--soundcheck-bg);
+	color: var(--soundcheck-fg);
+	font-family: system-ui, sans-serif;
+}
+
+main {
+	max-width: 900px;
+	margin-inline: auto;
+	padding: 24px;
+}
+
+#tree,
+#diff {
+	border: 1px solid var(--soundcheck-fg);
+	min-height: 120px;
+	max-height: 420px;
+	overflow: auto;
+}

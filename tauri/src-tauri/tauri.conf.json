@@ -4,7 +4,8 @@
 	"version": "0.0.1",
 	"identifier": "dev.hmmagainagain.app",
 	"build": {
-		"frontendDist": "../src"
+		"frontendDist": "../dist",
+		"beforeBuildCommand": "npm run build"
 	},
 	"app": {
 		"withGlobalTauri": true,
