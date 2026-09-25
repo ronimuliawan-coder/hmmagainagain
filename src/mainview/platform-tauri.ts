@@ -135,10 +135,18 @@ export function createTauriPlatform(): Platform {
 					throw error instanceof Error ? error : new Error(String(error));
 				}
 				return {
-					stop: () =>
-						invoke("watch_stop", { watchId }).then(() => {
-							off();
-						}),
+					stop: (): Promise<void> => {
+						const stopped = invoke("watch_stop", { watchId });
+						return stopped.then(
+							(): void => {
+								off();
+							},
+							(error: unknown): never => {
+								off();
+								throw error instanceof Error ? error : new Error(String(error));
+							},
+						);
+					},
 				};
 			})();
 		},
@@ -313,13 +321,16 @@ export function createTauriPlatform(): Platform {
 					opId,
 				});
 				if (!signal) {
-					return outcome.then((result) => {
-						off();
-						if (!result.ok) {
-							throw new Error(result.stderr || "remote op failed");
-						}
-						return result;
-					});
+					return outcome
+						.then((result) => {
+							if (!result.ok) {
+								throw new Error(result.stderr || "remote op failed");
+							}
+							return result;
+						})
+						.finally(() => {
+							off();
+						});
 				}
 				return new Promise<{ ok: boolean; stderr: string }>(
 					(resolve, reject) => {

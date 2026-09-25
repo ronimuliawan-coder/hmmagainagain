@@ -106,11 +106,15 @@ fn write_queues() -> &'static Mutex<HashMap<String, std::sync::Arc<Mutex<()>>>> 
 /// join the same serialization point around their critical sections (see
 /// remote.rs for the documented scope).
 pub(crate) fn write_lock_lane(root: &str) -> std::sync::Arc<Mutex<()>> {
+	// Key first: lane_key spawns git rev-parse, which must never run while
+	// the global queues lock is held (every repo's writes would serialize
+	// behind a subprocess spawn).
+	let key = lane_key(root);
 	let mut queues = write_queues()
 		.lock()
 		.unwrap_or_else(|e| e.into_inner());
 	let lane = queues
-		.entry(lane_key(root))
+		.entry(key)
 		.or_insert_with(|| std::sync::Arc::new(Mutex::new(())))
 		.clone();
 	if queues.len() > 64 {
@@ -306,8 +310,10 @@ pub async fn git_diff_start(
 #[tauri::command]
 pub async fn git_diff_abort(id: u64) -> Result<(), String> {	let mut registry = registry().lock().map_err(|e| format!("lock: {e}"))?;
 	if let Some(mut child) = registry.children.remove(&id) {
-		// Best effort: the child may already be gone.
+		// Best effort kill, then reap so no zombie remains (same shape as
+		// the remote abort; Child has no Drop impl that waits).
 		let _ = child.kill();
+		let _ = child.wait();
 	}
 	Ok(())
 }

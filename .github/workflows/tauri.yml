@@ -30,38 +30,20 @@ jobs:
     name: skip push when a PR covers it
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pull-requests: read
     outputs:
       run-ci: ${{ steps.check.outputs.run-ci }}
     steps:
-      - name: Check for an open PR on this branch
-        id: check
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          if [ "$GITHUB_EVENT_NAME" != push ]; then
-            echo "run-ci=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          count="$(curl -fsSL --max-time 30 -G \
-            --data-urlencode "head=${GITHUB_REPOSITORY_OWNER}:${GITHUB_REF_NAME}" \
-            --data-urlencode "state=open" \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/pulls" \
-            | python3 -c 'import json,sys
-          try:
-              data = json.load(sys.stdin)
-              print(len(data) if isinstance(data, list) else -1)
-          except Exception:
-              print(-1)' || echo -1)"
-          # Fail open: an API blip must cost a duplicate run, never a
-          # silently skipped gate.
-          if [ "${count:--1}" -ge 1 ]; then
-            echo "run-ci=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "run-ci=true" >> "$GITHUB_OUTPUT"
-          fi
+      # Local action: the repo must be present first (sparse: just this).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions/pr-dedupe
+      - id: check
+        uses: ./.github/actions/pr-dedupe
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
   bundle-linux:
     name: bundle Linux release
     needs: dedupe
@@ -77,8 +59,6 @@ jobs:
       # dependency set changes rarely, so a merge-committed volume stays
       # warm for subsequent PRs.
       - nscloud-cache-allow-commit-from-migration/tauri
-      - nscloud-cache-allow-commit-from-dev
-      - nscloud-cache-allow-commit-from-master
       - nscloud-git-mirror-5gb
       - nscloud-runner-tool-cache-20gb
     permissions:
@@ -90,14 +70,14 @@ jobs:
           persist-credentials: false
 
       - name: Set up Node + Rust
-        # Tags, not SHAs: SHAs unverifiable from here; pin them on first
-        # green CI review (M0 follow-up).
-        uses: actions/setup-node@v4
+        # SHAs verified against upstream refs; the trailing comment names
+        # the tag/branch they were resolved from.
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
           cache: npm
           cache-dependency-path: tauri/package-lock.json
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable 2026-09-25
 
       - name: Set up Bun (root web UI build)
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -153,15 +133,10 @@ jobs:
         run: npx tauri build
 
       - name: Report bundle
-        run: |
-          bundle="$(ls tauri/src-tauri/target/release/bundle/*/hmmagainagain* 2>/dev/null | head -1)"
-          if [ -n "$bundle" ]; then
-            bytes="$(stat -c %s "$bundle")"
-            echo "bundle=$bundle bytes=$bytes ($(awk "BEGIN {printf \"%.1f\", $bytes/1024/1024}") MiB)"
-          else
-            echo "no bundle artifact found"
-            exit 1
-          fi
+        # Same shared reporter as Windows/macOS: one rule everywhere, so a
+        # staging tree can never muddy one lane's proof but not the others'.
+        working-directory: tauri
+        run: node harness/report-bundle.mjs
 
   bundle-windows:
     name: bundle Windows release
@@ -178,17 +153,17 @@ jobs:
       contents: read
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
       - name: Set up Node + Rust
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
           cache: npm
           cache-dependency-path: tauri/package-lock.json
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable 2026-09-25
 
       - name: Set up Bun (root web UI build)
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -246,23 +221,21 @@ jobs:
       # macOS gets its own volume: target/ is not portable across OSes.
       - nscloud-cache-tag-hmmagainagain-tauri-macos
       - nscloud-cache-allow-commit-from-migration/tauri
-      - nscloud-cache-allow-commit-from-dev
-      - nscloud-cache-allow-commit-from-master
     permissions:
       contents: read
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
       - name: Set up Node + Rust
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
           cache: npm
           cache-dependency-path: tauri/package-lock.json
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable 2026-09-25
 
       - name: Set up Bun (root web UI build)
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2

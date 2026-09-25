@@ -72,6 +72,19 @@ describe("renderStatusList", () => {
 		expect(calls).toEqual(["all:stage", "all:unstage"]);
 	});
 
+	test("untracked files stay out of the Staged group", () => {
+		const { list } = render([
+			{ path: "a.txt", indexStatus: ".", worktreeStatus: "M" },
+			{ path: "new.txt", indexStatus: "?", worktreeStatus: "?" },
+			{ path: "b.txt", indexStatus: "M", worktreeStatus: "." },
+		]);
+		const headers = [...list.querySelectorAll(".status-group-header")];
+		expect(headers.map((h) => h.textContent)).toEqual([
+			"Unstaged (2)Stage all",
+			"Staged (1)Unstage all",
+		]);
+	});
+
 	test("checkboxes reflect their side and toggle it", () => {
 		const { list, calls } = render([
 			{ path: "a.txt", indexStatus: ".", worktreeStatus: "M" },

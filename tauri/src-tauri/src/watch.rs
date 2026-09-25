@@ -4,7 +4,7 @@
 // Paths are root-relative, deduplicated, insertion-ordered.
 
 use notify::Watcher;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{
 	Arc, Mutex, OnceLock,
@@ -52,7 +52,15 @@ fn next_batch(
 	stop: &AtomicBool,
 	root: &str,
 ) -> Option<Vec<String>> {
+	let mut seen: HashSet<String> = HashSet::new();
 	let mut pending: Vec<String> = Vec::new();
+	// Insertion-ordered dedup: the set answers membership in O(1), the
+	// vector preserves first-seen order for the batch.
+	let mut push = |path: String| {
+		if seen.insert(path.clone()) {
+			pending.push(path);
+		}
+	};
 	// Wait for the window opener, noticing stop while idle.
 	loop {
 		if stop.load(Ordering::Relaxed) {
@@ -61,9 +69,7 @@ fn next_batch(
 		match rx.recv_timeout(std::time::Duration::from_millis(500)) {
 			Ok(Ok(event)) => {
 				for path in relative_paths(root, &event) {
-					if !pending.contains(&path) {
-						pending.push(path);
-					}
+					push(path);
 				}
 				break;
 			}
@@ -76,9 +82,7 @@ fn next_batch(
 	while let Ok(result) = rx.try_recv() {
 		if let Ok(event) = result {
 			for path in relative_paths(root, &event) {
-				if !pending.contains(&path) {
-					pending.push(path);
-				}
+				push(path);
 			}
 		}
 	}
@@ -176,5 +180,30 @@ mod tests {
 	fn relative_paths_skip_outside_paths() {
 		let event = test_event(&["/r/a.txt", "/elsewhere/b.txt"]);
 		assert_eq!(relative_paths("/r", &event), vec!["a.txt"]);
+	}
+
+	#[test]
+	fn burst_dedup_is_near_linear() {
+		// 30k unique paths, each repeated: the old Vec::contains dedup did
+		// ~450M string compares here (seconds in debug builds); the set
+		// answers membership in O(1). Generous bound — this asserts the
+		// complexity class, not a benchmark number.
+		const UNIQUE: usize = 30_000;
+		let (tx, rx) = mpsc::channel();
+		let stop = AtomicBool::new(false);
+		let mut expected: Vec<String> = Vec::with_capacity(UNIQUE);
+		for i in 0..UNIQUE {
+			let path = format!("/r/file-{i:05}.txt");
+			expected.push(format!("file-{i:05}.txt"));
+			tx.send(Ok(test_event(&[&path]))).unwrap();
+		}
+		for i in 0..UNIQUE {
+			let path = format!("/r/file-{i:05}.txt");
+			tx.send(Ok(test_event(&[&path]))).unwrap();
+		}
+		let start = std::time::Instant::now();
+		let batch = next_batch(&rx, &stop, "/r").unwrap();
+		assert!(start.elapsed() < std::time::Duration::from_secs(5));
+		assert_eq!(batch, expected);
 	}
 }

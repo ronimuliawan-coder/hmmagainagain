@@ -35,16 +35,28 @@ const reducedMotion = (): boolean =>
 const maxTop = (element: HTMLElement): number =>
 	Math.max(0, element.scrollHeight - element.clientHeight);
 
-function scrollableAncestor(event: Event): HTMLElement | null {
+function scrollableAncestor(event: Event, delta: number): HTMLElement | null {
 	const path =
 		typeof event.composedPath === "function" ? event.composedPath() : [];
-	for (const node of path) {
-		if (
-			node instanceof HTMLElement &&
-			node.scrollHeight > node.clientHeight + 1
-		) {
-			return node;
+	// An in-flight glide owns its element: reversals and continuations must
+	// retarget it even when the live position has no room in the new
+	// direction — feed() decides whether there is anything to do. (Strict
+	// equality, not .includes: the unannotated ternary's union member
+	// poisons generic method resolution.)
+	const gliding = active?.element;
+	if (gliding) {
+		for (const node of path) {
+			if (node === gliding) return gliding;
 		}
+	}
+	for (const node of path) {
+		if (!(node instanceof HTMLElement)) continue;
+		if (node.scrollHeight <= node.clientHeight + 1) continue;
+		// Direction matters: an element at its edge still qualifies by size
+		// alone, but gliding it would go nowhere while cancelling the
+		// event — keep looking outward so scroll chaining survives.
+		const room = delta > 0 ? node.scrollTop < maxTop(node) : node.scrollTop > 0;
+		if (room) return node;
 	}
 	return null;
 }
@@ -73,8 +85,10 @@ function step(now: number): void {
  * position so motion stays smooth, but accumulates onto the active target —
  * targeting from the lagging live position on every notch capped sustained
  * speed below input rate and felt heavy (RON-381). A reversal starts over
- * from the live position instead of chasing the old direction. */
-function feed(element: HTMLElement, delta: number): void {
+ * from the live position instead of chasing the old direction. Returns
+ * whether the glide took the delta: false leaves the event native so
+ * chaining (bounce, parent scrollers) keeps working. */
+function feed(element: HTMLElement, delta: number): boolean {
 	const continuing =
 		active !== null &&
 		active.element === element &&
@@ -85,7 +99,7 @@ function feed(element: HTMLElement, delta: number): void {
 		active && active.element === element ? active.to : element.scrollTop;
 	const to = Math.min(maxTop(element), Math.max(0, base + delta));
 	// At a scroll edge with nowhere to go, leave the event native (bounce).
-	if (to === element.scrollTop && !active) return;
+	if (to === element.scrollTop && !active) return false;
 	const from = element.scrollTop;
 	if (active) cancelAnimationFrame(active.frame);
 	active = {
@@ -95,6 +109,7 @@ function feed(element: HTMLElement, delta: number): void {
 		start: null,
 		frame: requestAnimationFrame(step),
 	};
+	return true;
 }
 
 function onWheel(event: WheelEvent): void {
@@ -107,10 +122,11 @@ function onWheel(event: WheelEvent): void {
 		// Fractional or small pixel deltas are a touchpad — native is smooth.
 		return;
 	}
-	const target = scrollableAncestor(event);
+	const target = scrollableAncestor(event, delta);
 	if (!target) return;
-	event.preventDefault();
-	feed(target, delta);
+	// Cancel only when the glide moves the target: a cancelled edge event
+	// would block scroll chaining to outer scrollers.
+	if (feed(target, delta)) event.preventDefault();
 }
 
 /** Enables the glide for every scrollable in the document. Idempotent. */

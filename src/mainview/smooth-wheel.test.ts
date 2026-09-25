@@ -31,6 +31,8 @@ const { enableSmoothWheel } = await import("./smooth-wheel");
 
 function scrollBox(): HTMLDivElement {
 	const box = document.createElement("div");
+	// Real scrollers need overflow set; jsdom fakes the metrics below.
+	box.style.overflowY = "auto";
 	Object.defineProperty(box, "scrollHeight", {
 		value: 500,
 		configurable: true,
@@ -131,6 +133,30 @@ describe("enableSmoothWheel", () => {
 		wheel(child, { deltaY: -100 });
 		await settle();
 		expect(box.scrollTop).toBe(0);
+		box.remove();
+	});
+
+	test("leaves a bottom-edge downward notch native for chaining", async () => {
+		const box = scrollBox();
+		box.scrollTop = 400;
+		const prevented = !wheel(box.firstElementChild as HTMLElement, {
+			deltaY: 100,
+		});
+		expect(prevented).toBe(false);
+		await settle();
+		expect(box.scrollTop).toBe(400);
+		box.remove();
+	});
+
+	test("glides upward from the bottom edge", async () => {
+		const box = scrollBox();
+		box.scrollTop = 400;
+		const prevented = !wheel(box.firstElementChild as HTMLElement, {
+			deltaY: -100,
+		});
+		expect(prevented).toBe(true);
+		await settle();
+		expect(box.scrollTop).toBe(300);
 		box.remove();
 	});
 });
