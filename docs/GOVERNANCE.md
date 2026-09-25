@@ -47,9 +47,9 @@ A target-state document never overrides a still-active production safeguard.
 | Rendering | `@pierre/trees` (FileTree) + `@pierre/diffs` (CodeView) + `@pierre/theming` |
 | Background work | @pierre worker pool (highlighting); main-process fs watcher (refresh) |
 | Filesystem access | Main-process commands scoped to the opened repository root |
-| Errors | Structured `{code, stderr, hint}` from GitAdapter; stderr shown verbatim |
+| Errors | Structured `{code, stderr, hint}` from the Rust git layer; stderr shown verbatim |
 | Analytics | None (invariant 2) |
-| Packaging/deployment | Electrobun bundler; signing deferred to its owning unit |
+| Packaging/deployment | Tauri bundler (nsis/msi, dmg/app, AppImage/deb/rpm); signing deferred to its owning unit |
 | Logging | Local rotating file + in-app toasts; no external reporting |
 | Recovery | Settings reset to defaults; repo operations never destructive by default |
 
@@ -80,5 +80,5 @@ For any material ownership or technology conflict, present at least three choice
 recommended single owner, explicit hybrid/adapter, materially different alternative or
 deferral — with benefits, drawbacks, migration/rollback impact, operational burden, and
 evidence. The owner decides. Durable decisions are recorded in `docs/decisions/`
-(currently [ADR-0001](decisions/ADR-0001-stack.md): Electrobun + subprocess git + vanilla
-TypeScript, with Tauri as the documented fallback behind the platform adapter).
+(currently [ADR-0003](decisions/ADR-0003-tauri-cutover.md): Tauri 2 + subprocess git + vanilla
+TypeScript; Electrobun remains in history as the pre-cutover shell).

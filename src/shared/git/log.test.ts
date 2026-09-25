@@ -2,7 +2,7 @@
 // reads — including multi-byte sequences — must reassemble exactly
 // (CodeRabbit follow-up round; complements the decodeChunks suite).
 import { describe, expect, test } from "bun:test";
-import { LOG_FORMAT, LogRecordParser } from "./log";
+import { LOG_FORMAT, LogRecordParser } from "./log-parse";
 
 const enc = new TextEncoder();
 const FS = "\x1f";

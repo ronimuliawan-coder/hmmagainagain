@@ -99,15 +99,22 @@ jobs:
           cache-dependency-path: tauri/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Set up Bun (root web UI build)
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.0"
+
       - name: Cache cargo build artifacts
         # NOTE: never cache ~/.cargo itself — the mount shadows the
         # just-installed toolchain (rustup + cargo vanish for later steps).
         # Cache only the registry downloads and the build tree. apt joins
-        # the list so the webview headers below install from cache.
+        # the list so the webview headers below install from cache; bun
+        # covers the root web install below (bun must be set up first).
         uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1
         with:
           cache: |
             apt
+            bun
           path: |
             ~/.cargo/registry
             tauri/src-tauri/target
@@ -128,6 +135,11 @@ jobs:
       - name: Install frontend dependencies
         working-directory: tauri
         run: npm ci
+
+      - name: Install root web dependencies
+        # Runs at the workspace root (no working-directory): the shell's
+        # beforeBuildCommand builds the real UI from there.
+        run: bun install --frozen-lockfile
 
       - name: Build bundle
         # CI-only profile relief: the shipped profile (lto=true,
@@ -178,12 +190,22 @@ jobs:
           cache-dependency-path: tauri/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Set up Bun (root web UI build)
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.0"
+
       - name: Verify Rust toolchain
         run: cargo --version && rustc --version
 
       - name: Install frontend dependencies
         working-directory: tauri
         run: npm ci
+
+      - name: Install root web dependencies
+        # Runs at the workspace root (no working-directory): the shell's
+        # beforeBuildCommand builds the real UI from there.
+        run: bun install --frozen-lockfile
 
       - name: Build bundle
         # Same CI-only profile relief as Linux; shipped profile untouched.
@@ -229,6 +251,11 @@ jobs:
           cache-dependency-path: tauri/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Set up Bun (root web UI build)
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.0"
+
       - name: Cache cargo build artifacts
         # Same never-cache-~/.cargo rule as Linux (a mount would shadow
         # the just-installed toolchain). Unsigned build: no Apple
@@ -245,6 +272,11 @@ jobs:
       - name: Install frontend dependencies
         working-directory: tauri
         run: npm ci
+
+      - name: Install root web dependencies
+        # Runs at the workspace root (no working-directory): the shell's
+        # beforeBuildCommand builds the real UI from there.
+        run: bun install --frozen-lockfile
 
       - name: Build bundle
         # Same CI-only profile relief as Linux; shipped profile untouched.

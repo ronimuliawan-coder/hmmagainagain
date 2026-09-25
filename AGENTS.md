@@ -1,7 +1,7 @@
 # Agent Instructions
 
 hmmagainagain is a lightweight, fast, cross-platform (Linux/Windows/macOS) desktop git
-client built on Electrobun, Pierre's open-source `@pierre/diffs` + `@pierre/trees`
+client built on Tauri 2 (Rust core + system webview), Pierre's open-source `@pierre/diffs` + `@pierre/trees`
 components, and a subprocess-`git` engine. It is delivered through the
 [`high-assurance-engineering`](.agents/skills/high-assurance-engineering/SKILL.md)
 standard: phase-gated, evidence-driven, one unit at a time. Read
@@ -49,8 +49,8 @@ findings on the originating GitHub pull-request branch
    user-supplied paths. The app never mutates a user repository's state without an explicit
    user action, stores no credentials, and sends no telemetry. See
    [`docs/GOVERNANCE.md`](docs/GOVERNANCE.md) invariants.
-4. **Versions are pinned at the owning unit and never silently downgraded.** Electrobun is
-   pinned in `hutch.config.ts`; @pierre packages are pinned in `package.json` when their
+4. **Versions are pinned at the owning unit and never silently downgraded.** The Tauri
+   shell version is pinned in `tauri/src-tauri/Cargo.toml`; @pierre packages are pinned in `package.json` when their
    units add them (U3/U4). Do not update a related dependency in a way that silently
    downgrades another.
 5. **Do not edit the approved PRD or an approved unit plan retroactively.** Changes are

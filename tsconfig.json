@@ -1,5 +1,4 @@
 {
-	"extends": "./.hutch/devkit/tsconfig.json",
 	"compilerOptions": {
 		"target": "ESNext",
 		"module": "ESNext",

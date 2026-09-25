@@ -16,12 +16,7 @@ import { mountFileTree, type TreeHandle } from "./file-tree-wrapper";
 import { statusToTreeEntries } from "./git-status-mapping";
 import { FALLBACK_ROW_HEIGHT, windowRows } from "./history-window";
 import { buildStagedPatch } from "./patch-surgery";
-import {
-	getPlatform,
-	getPlatformLoadError,
-	isElectrobun,
-	sendSelfTestResult,
-} from "./platform";
+import { getPlatform, isTauri } from "./platform";
 import { enableSmoothWheel } from "./smooth-wheel";
 import { staticTheme } from "./static-themes";
 import { renderStatusList } from "./status-list";
@@ -138,7 +133,7 @@ let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 // Guards against applying a stale diff response after a rapid range switch.
 let diffSeq = 0;
 let diffController: AbortController | null = null;
-// Stage timings of the last diff load — read by the SMOKE self-test.
+// Stage timings of the last diff load (perf telemetry for the budget).
 const diffTimings = { fetchMs: 0, parseMs: 0, files: 0 };
 // The patch behind the current diff view + the user's line selection in it —
 // the inputs to hunk staging (patch surgery).
@@ -402,7 +397,7 @@ openBtn.addEventListener("click", () => {
 
 // Native folder picker (main-process Gtk dialog). Hidden in plain-browser
 // dev: the fake has no dialog and must never learn absolute paths.
-browseBtn.hidden = !isElectrobun();
+browseBtn.hidden = !isTauri();
 browseBtn.addEventListener("click", () => {
 	void getPlatform()
 		.pickDirectory()
@@ -1136,128 +1131,6 @@ repoInput.addEventListener("keydown", (event) => {
 });
 branchName.addEventListener("keydown", (event) => {
 	if (event.key === "Enter") branchCreateBtn.click();
-});
-
-/** Samples requestAnimationFrame gaps while stepping the diff scroll — a
- * cheap jank proxy for the scroll-smoothness budget. SMOKE-only. */
-function sampleScrollGaps(
-	durationMs: number,
-): Promise<{ maxGap: number; p95Gap: number }> {
-	const gaps: number[] = [];
-	let last = performance.now();
-	const start = last;
-	return new Promise((resolve) => {
-		const step = (now: number) => {
-			gaps.push(now - last);
-			last = now;
-			// Step the scroll; wrap at the bottom to keep frames flowing.
-			diffContainer.scrollTop += Math.max(
-				120,
-				diffContainer.clientHeight * 0.15,
-			);
-			if (
-				diffContainer.scrollTop + diffContainer.clientHeight >=
-				diffContainer.scrollHeight - 1
-			) {
-				diffContainer.scrollTop = 0;
-			}
-			if (now - start >= durationMs) {
-				const sorted = [...gaps].sort((a, b) => a - b);
-				const p95 =
-					sorted[
-						Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))
-					] ?? 0;
-				resolve({ maxGap: sorted[sorted.length - 1] ?? 0, p95Gap: p95 });
-				return;
-			}
-			requestAnimationFrame(step);
-		};
-		requestAnimationFrame(step);
-	});
-}
-
-// ---- SMOKE=1 self-test (driven by the main process over RPC) ----
-window.addEventListener("hmmagainagain:self-test", (event) => {
-	const detail = (
-		event as CustomEvent<{
-			root: string;
-			stage?: boolean;
-			branch?: boolean;
-		}>
-	).detail;
-	const root = detail.root;
-	const run = async (): Promise<{ ok: boolean; detail: string }> => {
-		const loadError = getPlatformLoadError();
-		if (loadError) {
-			return { ok: false, detail: `LOAD ERR: ${loadError}` };
-		}
-		const status = await getPlatform().gitStatus(root);
-		await openRepo(root);
-		// Let the tree render its rows before counting them.
-		await new Promise((resolve) => setTimeout(resolve, 500));
-		const treeRows = tree?.getRowCount() ?? 0;
-		const statusItems = statusList.children.length;
-		// Diff flow + stage timings (RON-297 budget evidence).
-		const diffT0 = performance.now();
-		await refreshDiff();
-		const diffTotalMs = performance.now() - diffT0;
-		// First diff paint, then sample frame gaps while scrolling.
-		await new Promise((resolve) => requestAnimationFrame(resolve));
-		const scroll = await sampleScrollGaps(1500);
-		// SMOKE_STAGE=1: staging/commit flow — fixture repos ONLY.
-		let stageDetail = "stage=off";
-		let stageOk = true;
-		if (detail.stage) {
-			const first = status.entries[0]?.path;
-			if (!first) {
-				stageOk = false;
-				stageDetail = "stage=no-entries";
-			} else {
-				await getPlatform().stagePaths(root, [first]);
-				let st = await getPlatform().gitStatus(root);
-				const stagedOk =
-					(st.entries.find((e) => e.path === first)?.indexStatus ?? ".") !==
-					".";
-				await getPlatform().unstagePaths(root, [first]);
-				st = await getPlatform().gitStatus(root);
-				const unstagedOk =
-					(st.entries.find((e) => e.path === first)?.indexStatus ?? ".") ===
-					".";
-				await getPlatform().stagePaths(root, [first]);
-				await getPlatform().commit(root, "smoke: fixture commit");
-				st = await getPlatform().gitStatus(root);
-				const committedOk = !st.entries.some((e) => e.indexStatus !== ".");
-				stageDetail = `stage staged=${stagedOk} unstaged=${unstagedOk} committed=${committedOk}`;
-				stageOk = stagedOk && unstagedOk && committedOk;
-			}
-		}
-		// SMOKE_BRANCH=1: branch create/switch flow — fixture repos ONLY.
-		let branchDetail = "branch=off";
-		let branchOk = true;
-		if (detail.branch) {
-			const smokeBranch = `u6-smoke-${Date.now()}`;
-			await getPlatform().gitCreateBranch(root, smokeBranch, true);
-			let list = await getPlatform().gitBranches(root);
-			const createdOk = list.find((b) => b.current)?.name === smokeBranch;
-			await getPlatform().gitSwitchBranch(root, "main");
-			list = await getPlatform().gitBranches(root);
-			const switchedOk = list.find((b) => b.current)?.name === "main";
-			branchDetail = `branch created=${createdOk} switchedBack=${switchedOk}`;
-			branchOk = createdOk && switchedOk;
-		}
-		const domOk =
-			treeRows > 0 &&
-			statusItems > 0 &&
-			store.get().root === root &&
-			(status.entries.length === 0 || diffTimings.files > 0) &&
-			(!detail.stage || stageOk) &&
-			(!detail.branch || branchOk);
-		const detailText = `treeRows=${treeRows} statusItems=${statusItems} entries=${status.entries.length} diffFiles=${diffTimings.files} diffTotalMs=${diffTotalMs.toFixed(0)} fetchMs=${diffTimings.fetchMs.toFixed(0)} parseMs=${diffTimings.parseMs.toFixed(0)} scrollMaxGap=${scroll.maxGap.toFixed(1)} scrollP95Gap=${scroll.p95Gap.toFixed(1)} ${stageDetail} ${branchDetail}`;
-		return { ok: domOk, detail: detailText };
-	};
-	void run()
-		.then(({ ok, detail }) => sendSelfTestResult({ ok, detail }))
-		.catch((error) => sendSelfTestResult({ ok: false, detail: String(error) }));
 });
 
 interface RecentRepos {
