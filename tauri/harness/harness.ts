@@ -21,7 +21,7 @@ const SAMPLE_PATCH = [
 	"diff --git a/src/theme.ts b/src/theme.ts",
 	"--- a/src/theme.ts",
 	"+++ b/src/theme.ts",
-	"@@ -1,3 +1,3 @@",
+	"@@ -1,2 +1,2 @@",
 	"-export const bg = '#ffffff';",
 	"+export const bg = '#0a0a0a';",
 	" export const fg = '#0a0a0a';",
@@ -30,7 +30,8 @@ const SAMPLE_PATCH = [
 // Inline of the app's patch-to-items mapping (src/mainview/patch-to-items):
 // unified patch text → one CodeView diff item per file. Duplicated (not
 // imported) because the harness bundles from tauri/node_modules alone.
-function patchToItems(patch: string): CodeViewItem[] {
+// Exported so tests lock the sample patch to exactly one item.
+export function patchToItems(patch: string): CodeViewItem[] {
 	const items: CodeViewItem[] = [];
 	for (const parsed of parsePatchFiles(patch)) {
 		for (const fileDiff of parsed.files) {
@@ -75,24 +76,35 @@ export function mountSoundcheckTree(container: HTMLElement): FileTree {
 	return tree;
 }
 
-export function mountSoundcheckDiff(container: HTMLElement): CodeView {
+export function mountSoundcheckDiff(
+	container: HTMLElement,
+	withWorker = true,
+): CodeView {
 	// Same worker pattern as the app's diff-view wrapper: the pool loads
 	// the Shiki worker through a bare-specifier URL, which only resolves
 	// under a bundler with ES-module workers (see tauri/vite.config.ts).
 	// If this line breaks a Tauri build, the app's highlighting breaks too.
-	const pool = getOrCreateWorkerPoolSingleton({
-		poolOptions: {
-			poolSize: 1,
-			workerFactory: () =>
-				new Worker(new URL("@pierre/diffs/worker/worker.js", import.meta.url), {
-					type: "module",
-				}),
-		},
-		highlighterOptions: {
-			langs: ["typescript"],
-			theme: { light: "pierre-light", dark: "pierre-dark" },
-		},
-	});
+	// withWorker=false is test-only: it mounts pool-less (highlighting
+	// falls back to the main thread) so jsdom can assert mounted content
+	// without a Worker implementation.
+	const pool = withWorker
+		? getOrCreateWorkerPoolSingleton({
+				poolOptions: {
+					poolSize: 1,
+					workerFactory: () =>
+						new Worker(
+							new URL("@pierre/diffs/worker/worker.js", import.meta.url),
+							{
+								type: "module",
+							},
+						),
+				},
+				highlighterOptions: {
+					langs: ["typescript"],
+					theme: { light: "pierre-light", dark: "pierre-dark" },
+				},
+			})
+		: undefined;
 	const viewer = new CodeView(
 		{
 			theme: { light: "pierre-light", dark: "pierre-dark" },

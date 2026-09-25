@@ -41,6 +41,9 @@ Object.assign(globalThis, {
 	ResizeObserver: MockResizeObserver,
 	SVGElement: dom.window.SVGElement,
 	ShadowRoot: dom.window.ShadowRoot,
+	requestAnimationFrame: (callback: FrameRequestCallback): number =>
+		setTimeout(() => callback(Date.now()), 0) as unknown as number,
+	cancelAnimationFrame: (handle: number): void => clearTimeout(handle),
 	window: dom.window,
 });
 
@@ -49,7 +52,12 @@ const flushDom = async (): Promise<void> => {
 };
 
 // Dynamic import ON PURPOSE: it must evaluate after the globals above exist.
-const { applySoundcheckTheme, mountSoundcheckTree } = await import("./harness");
+const {
+	applySoundcheckTheme,
+	mountSoundcheckDiff,
+	mountSoundcheckTree,
+	patchToItems,
+} = await import("./harness");
 // Theme objects imported directly: token values are upstream data, never
 // hardcoded guesses in the assertions below.
 const { default: pierreLight } = await import("@pierre/theme/pierre-light");
@@ -89,6 +97,24 @@ describe("soundcheck", () => {
 		await flushDom();
 		expect(tree.getVisibleCount()).toBeGreaterThan(0);
 		tree.cleanUp();
+		container.remove();
+	});
+
+	test("sample patch maps to exactly one diff item", () => {
+		const items = patchToItems(
+			"diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n",
+		);
+		expect(items).toHaveLength(1);
+		expect(items[0].id).toBe("diff:x");
+	});
+
+	test("diff mounts the sample file without a worker", async () => {
+		const container = document.createElement("div");
+		document.body.appendChild(container);
+		const viewer = mountSoundcheckDiff(container, false);
+		await flushDom();
+		expect(viewer.getItem("diff:src/theme.ts")).toBeDefined();
+		viewer.cleanUp();
 		container.remove();
 	});
 });
