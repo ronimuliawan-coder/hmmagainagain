@@ -203,7 +203,7 @@ jobs:
         # min on 2 cores). sccache backs the compile cache on the GHA
         # cache, so only changed crates rebuild. Windows-only for now:
         # Linux/macOS ride warm nscloud target/ volumes instead.
-        uses: mozilla-actions/sccache-action@v0.0.11
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
 
       - name: Install frontend dependencies
         working-directory: tauri
