@@ -2,7 +2,7 @@
 // invoke answers from fixtures so parsing + arg mapping are proven without
 // a webview. The Rust side is covered by cargo tests in git.rs.
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { createTauriPlatform, isTauri } from "./platform-tauri";
 
 const calls: { command: string; args?: Record<string, unknown> }[] = [];
@@ -165,6 +165,16 @@ function stubBridge(): void {
 }
 
 describe("platform-tauri (M1 bridge)", () => {
+	// stubBridge assigns globalThis.window and never cleans up; restore it
+	// so later suites (e.g. the platform selector) see a plain browser.
+	const g = globalThis as unknown as {
+		window?: { __TAURI__?: unknown };
+	};
+	const savedWindow = g.window;
+	afterEach(() => {
+		g.window = savedWindow;
+	});
+
 	test("detects the bridge and reads a repo", async () => {
 		stubBridge();
 		calls.length = 0;
