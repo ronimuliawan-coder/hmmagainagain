@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>hmmagainagain soundcheck</title>
+		<link rel="stylesheet" href="/harness.css" />
+		<script type="module" src="/harness.ts"></script>
+	</head>
+	<body>
+		<main>
+			<h1>soundcheck</h1>
+			<p>
+				Minimal mount of the Pierre entries the app is built on, inside
+				the Tauri shell. If the tree and the diff render here, the
+				entries resolve, bundle, and theme under this webview.
+			</p>
+			<div class="controls">
+				<button id="scheme-toggle" type="button">Light</button>
+			</div>
+			<section aria-label="file tree">
+				<h2>tree</h2>
+				<div id="tree"></div>
+			</section>
+			<section aria-label="diff">
+				<h2>diff</h2>
+				<div id="diff"></div>
+			</section>
+		</main>
+	</body>
+</html>

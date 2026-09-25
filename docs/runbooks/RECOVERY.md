@@ -25,13 +25,10 @@ git state, verify toolchain, verify gate, then compare against the Linear ledger
 2. `gh pr list` — open PRs are the truth for in-flight units.
 3. Compare the last merged unit against the GOVERNANCE unit table; the next unit starts
    only with owner confirmation.
-4. Toolchain check: `bun --version` (1.4.0), `hutch --version` (0.26.0 via
-   `~/.hutch/bin` — wired by a PATH line in `~/.bashrc`; installer:
-   `curl -fsSL https://hutch.blackboard.sh/hutch/install.sh | sh`), Electrobun pinned **2.0.1** in
-   `hutch.config.ts`, provisioned by `hutch electrobun prepare` into `./.hutch/devkit`
-   (gitignored). If only `~/.hutch/bin` is missing but `~/.hutch` still exists, do not
-   rerun the installer (it refuses a pre-existing `~/.hutch`); if `~/.hutch` is entirely
-   absent, a fresh install is safe and required (done 2026-09-15).
+4. Toolchain check: `bun --version` (1.4.0), `cargo --version` (stable via
+   rustup), `node --version` (24). No Hutch/Electrobun anymore (removed at
+   M6 cutover): if `~/.hutch` still exists it is inert — leave it, do not
+   reinstall.
 5. `bun run install:deps` if `node_modules` is missing, then `bun run check` — must be
    green before any change.
 6. Reference clone `/home/ron/Projects/pierre` is read-only; if missing, it is optional —
@@ -40,21 +37,17 @@ git state, verify toolchain, verify gate, then compare against the Linear ledger
 ## Machine profile (primary dev machine)
 
 EndeavourOS (Arch-based), KDE on Wayland, webkit2gtk 4.1 present (2.52.6). The app
-launches from `build/<env>-linux-x64/hmmagainagain/bin/launcher`, which self-extracts to
-`~/.local/share/dev.hmmagainagain.app/<env>/app`.
+launches from the Tauri bundle under `tauri/src-tauri/target/release/bundle/`
+(AppImage locally; installed `.deb`/`.rpm` payloads register the app).
 
 ## Testing notes
 
-- **After `bun run build`, refresh the installed app before testing**: run the build
-  directory launcher (`build/<env>-linux-x64/hmmagainagain/bin/launcher`) once — it
-  re-extracts into `~/.local/share/dev.hmmagainagain.app/`. The installed launcher then
-  runs the NEW build; skipping this step silently tests a stale bundle.
-- SMOKE_STAGE / SMOKE_BRANCH flows mutate their target repository — point `SMOKE_ROOT`
-  at a throwaway fixture only.
-- **Rebuild webview assets before testing UI changes:** the app serves `dist/`
-  (vite output), not `src/mainview/` — run `vite build` (or `hutch run dev`,
-  which chains it) after editing UI sources. `bun run dev` alone serves a
-  stale bundle with no warning (bitten 2026-09-15: missing remote bar).
+- **Rebuild webview assets before testing UI changes:** the Tauri shell serves
+  `dist/` (vite output), not `src/mainview/` — run `bun run build:web` after
+  editing UI sources. `bun run dev` serves from source with HMR instead.
+- The SMOKE self-test driver (main-process RPC) was removed with Electrobun
+  at M6; the contract is now covered by `platform.conformance` (fake) plus
+  the Rust command tests.
 
 ## Known limitations
 

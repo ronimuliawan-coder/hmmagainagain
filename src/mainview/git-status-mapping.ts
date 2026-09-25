@@ -3,7 +3,7 @@
 // files (which have no worktree path) surface in the status list instead.
 
 import type { GitStatusEntry } from "@pierre/trees";
-import type { StatusEntry } from "../bun/git/status-parser";
+import type { StatusEntry } from "../shared/git/status-parser";
 
 const LETTER_TO_STATUS: Record<string, GitStatusEntry["status"]> = {
 	M: "modified",

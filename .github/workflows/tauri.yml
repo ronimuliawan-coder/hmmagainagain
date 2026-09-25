@@ -1,0 +1,304 @@
+# Tauri sidecar CI (RON-397 M0, matrix in RON-402 M5): release bundles for
+# tauri/, path-gated so product CI stays fast. Linux is the warm, cached
+# lane; Windows/macOS prove the packaging matrix (cold builds for now —
+# the nscloud cache action only supports Linux/macOS mounts, and Windows
+# support is unverified, so no cache volume rides those jobs yet).
+
+name: tauri
+
+on:
+  push:
+    branches: ["migration/**", "feat/**", "fix/**", "docs/**", "chore/**"]
+    paths:
+      - "tauri/**"
+      - ".github/workflows/tauri.yml"
+  pull_request:
+    paths:
+      - "tauri/**"
+      - ".github/workflows/tauri.yml"
+
+concurrency:
+  group: tauri-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  # Same push/PR dedupe as product.yml: an open PR on the branch means the
+  # PR run does the work and this push run stands down.
+  dedupe:
+    name: skip push when a PR covers it
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      run-ci: ${{ steps.check.outputs.run-ci }}
+    steps:
+      - name: Check for an open PR on this branch
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != push ]; then
+            echo "run-ci=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          count="$(curl -fsSL --max-time 30 -G \
+            --data-urlencode "head=${GITHUB_REPOSITORY_OWNER}:${GITHUB_REF_NAME}" \
+            --data-urlencode "state=open" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/pulls" \
+            | python3 -c 'import json,sys
+          try:
+              data = json.load(sys.stdin)
+              print(len(data) if isinstance(data, list) else -1)
+          except Exception:
+              print(-1)' || echo -1)"
+          # Fail open: an API blip must cost a duplicate run, never a
+          # silently skipped gate.
+          if [ "${count:--1}" -ge 1 ]; then
+            echo "run-ci=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run-ci=true" >> "$GITHUB_OUTPUT"
+          fi
+  bundle-linux:
+    name: bundle Linux release
+    needs: dedupe
+    if: needs.dedupe.outputs.run-ci == 'true'
+    runs-on:
+      - nscloud-ubuntu-24.04-amd64-4x8-with-cache
+      - nscloud-cache-size-20gb
+      - nscloud-cache-tag-hmmagainagain-tauri
+      # Without an allow-commit label the volume never writes back, so
+      # every run recompiles all crates cold. The volume warms from push
+      # runs on these branches (PR runs read it); per-PR write-back is
+      # impossible with static branch labels, and unnecessary — the
+      # dependency set changes rarely, so a merge-committed volume stays
+      # warm for subsequent PRs.
+      - nscloud-cache-allow-commit-from-migration/tauri
+      - nscloud-cache-allow-commit-from-dev
+      - nscloud-cache-allow-commit-from-master
+      - nscloud-git-mirror-5gb
+      - nscloud-runner-tool-cache-20gb
+    permissions:
+      contents: read
+    steps:
+      - name: Check out (cached mirror)
+        uses: namespacelabs/nscloud-checkout-action@def520b6c21233362f09c9ceda4352c51cceca26 # v8
+        with:
+          persist-credentials: false
+
+      - name: Set up Node + Rust
+        # Tags, not SHAs: SHAs unverifiable from here; pin them on first
+        # green CI review (M0 follow-up).
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: tauri/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Bun (root web UI build)
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.0"
+
+      - name: Cache cargo build artifacts
+        # NOTE: never cache ~/.cargo itself — the mount shadows the
+        # just-installed toolchain (rustup + cargo vanish for later steps).
+        # Cache only the registry downloads and the build tree. apt joins
+        # the list so the webview headers below install from cache; bun
+        # covers the root web install below (bun must be set up first).
+        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1
+        with:
+          cache: |
+            apt
+            bun
+          path: |
+            ~/.cargo/registry
+            tauri/src-tauri/target
+
+      - name: Verify Rust toolchain
+        run: |
+          which cargo rustc
+          cargo --version
+          rustc --version
+
+      - name: Install system webview headers
+        run: |
+          dpkg -s libwebkit2gtk-4.1-dev >/dev/null 2>&1 || {
+            sudo apt-get update -qq
+            sudo apt-get install -qy libwebkit2gtk-4.1-dev
+          }
+
+      - name: Install frontend dependencies
+        working-directory: tauri
+        run: npm ci
+
+      - name: Install root web dependencies
+        # Runs at the workspace root (no working-directory): the shell's
+        # beforeBuildCommand builds the real UI from there.
+        run: bun install --frozen-lockfile
+
+      - name: Build bundle
+        # CI-only profile relief: the shipped profile (lto=true,
+        # codegen-units=1) links for minutes on 4 cores. These env
+        # overrides trade bundle size for CI speed; Cargo.toml — and the
+        # release artifact — are untouched.
+        env:
+          CARGO_PROFILE_RELEASE_LTO: "false"
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "4"
+        working-directory: tauri
+        run: npx tauri build
+
+      - name: Report bundle
+        run: |
+          bundle="$(ls tauri/src-tauri/target/release/bundle/*/hmmagainagain* 2>/dev/null | head -1)"
+          if [ -n "$bundle" ]; then
+            bytes="$(stat -c %s "$bundle")"
+            echo "bundle=$bundle bytes=$bytes ($(awk "BEGIN {printf \"%.1f\", $bytes/1024/1024}") MiB)"
+          else
+            echo "no bundle artifact found"
+            exit 1
+          fi
+
+  bundle-windows:
+    name: bundle Windows release
+    needs: dedupe
+    if: needs.dedupe.outputs.run-ci == 'true'
+    runs-on:
+      # GitHub-hosted, deliberately: nscloud-windows-2022-amd64-4x8 (with
+      # and without -with-cache) never scheduled — no log, no error, ~20
+      # min queued. Either the workspace lacks Windows entitlement or the
+      # label is wrong; owner to confirm on the Namespace dashboard.
+      # Revisit to Namespace-native once Windows runners pick up jobs.
+      - windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node + Rust
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: tauri/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Bun (root web UI build)
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.0"
+
+      - name: Verify Rust toolchain
+        run: cargo --version && rustc --version
+
+      - name: Set up sccache (shared compile cache)
+        # Cold ephemeral runners recompile all ~200 crates every run (~8
+        # min on 2 cores). sccache backs the compile cache on the GHA
+        # cache, so only changed crates rebuild. Windows-only for now:
+        # Linux/macOS ride warm nscloud target/ volumes instead.
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+
+      - name: Install frontend dependencies
+        working-directory: tauri
+        run: npm ci
+
+      - name: Install root web dependencies
+        # Runs at the workspace root (no working-directory): the shell's
+        # beforeBuildCommand builds the real UI from there.
+        run: bun install --frozen-lockfile
+
+      - name: Build bundle
+        # Same CI-only profile relief as Linux; shipped profile untouched.
+        # WebView2/WiX/NSIS come with the runner image or are fetched by
+        # tauri-bundler — no setup step until a red run says otherwise.
+        env:
+          CARGO_PROFILE_RELEASE_LTO: "false"
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "4"
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: "sccache"
+        working-directory: tauri
+        run: npx tauri build
+
+      - name: Show sccache stats
+        shell: bash
+        run: ${SCCACHE_PATH} --show-stats
+
+      - name: Report bundle
+        # Script file, not `node -e`: PowerShell mangles inline backticks
+        # and quotes (proven red). Same file on macOS for uniformity.
+        working-directory: tauri
+        run: node harness/report-bundle.mjs
+
+  bundle-macos:
+    name: bundle macOS release
+    needs: dedupe
+    if: needs.dedupe.outputs.run-ci == 'true'
+    runs-on:
+      - nscloud-macos-sequoia-arm64-6x14-with-cache
+      - nscloud-cache-size-20gb
+      # macOS gets its own volume: target/ is not portable across OSes.
+      - nscloud-cache-tag-hmmagainagain-tauri-macos
+      - nscloud-cache-allow-commit-from-migration/tauri
+      - nscloud-cache-allow-commit-from-dev
+      - nscloud-cache-allow-commit-from-master
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node + Rust
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: tauri/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Bun (root web UI build)
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.0"
+
+      - name: Cache cargo build artifacts
+        # Same never-cache-~/.cargo rule as Linux (a mount would shadow
+        # the just-installed toolchain). Unsigned build: no Apple
+        # credentials needed to produce the .dmg, only to notarize it.
+        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1
+        with:
+          path: |
+            ~/.cargo/registry
+            tauri/src-tauri/target
+
+      - name: Verify Rust toolchain
+        run: cargo --version && rustc --version
+
+      - name: Install frontend dependencies
+        working-directory: tauri
+        run: npm ci
+
+      - name: Install root web dependencies
+        # Runs at the workspace root (no working-directory): the shell's
+        # beforeBuildCommand builds the real UI from there.
+        run: bun install --frozen-lockfile
+
+      - name: Build bundle
+        # Same CI-only profile relief as Linux; shipped profile untouched.
+        env:
+          CARGO_PROFILE_RELEASE_LTO: "false"
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "4"
+        working-directory: tauri
+        run: npx tauri build
+
+      - name: Report bundle
+        working-directory: tauri
+        run: node harness/report-bundle.mjs
