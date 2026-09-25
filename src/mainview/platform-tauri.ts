@@ -5,8 +5,8 @@
 // land. No Electrobun imports — this module loads in any webview where
 // window.__TAURI__ exists.
 
-import { parsePatchStats } from "../bun/git/diff";
-import { parseStatusV2 } from "../bun/git/status-parser";
+import { parsePatchStats } from "../shared/git/diff-parse";
+import { parseStatusV2 } from "../shared/git/status-parser";
 import type {
 	BranchInfo,
 	DiffResult,

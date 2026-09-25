@@ -1,14 +1,5 @@
-// Diff read path: a SINGLE git traversal per request (post-v1 Unit A).
-// File statistics derive from the patch text itself; the old --numstat
-// second traversal was removed after differential proof (see diff.test.ts).
-//
-// Range semantics:
-//   { staged: true }                 → git diff --cached          (index vs HEAD)
-//   { from: "HEAD" }                 → git diff HEAD              (HEAD vs worktree)
-//   { from: "a", to: "b" }           → git diff a b               (commit vs commit)
-//   {}                               → git diff                   (index vs worktree)
-
-import { decodeChunks, spawnGit } from "../git-spawn";
+// Pure patch parsing, engine-agnostic (moved from the Bun git engine
+// at M6 cutover; the Tauri bridge and its tests depend on this).
 
 export interface DiffFile {
 	path: string;
@@ -21,42 +12,6 @@ export interface DiffFile {
 export interface DiffResult {
 	files: DiffFile[];
 	patch: string;
-}
-
-export interface DiffOptions {
-	staged?: boolean;
-	from?: string;
-	to?: string;
-	pathspecs?: string[];
-	/** Aborts the in-flight diff; never serialized anywhere. */
-	signal?: AbortSignal;
-}
-
-function rangeArgs(options: DiffOptions): string[] {
-	if (options.staged) return ["--cached"];
-	if (options.from && options.to) return [options.from, options.to];
-	if (options.from) return [options.from];
-	return [];
-}
-
-function pathArgs(options: DiffOptions): string[] {
-	return options.pathspecs?.length ? ["--", ...options.pathspecs] : [];
-}
-
-async function collectText(
-	root: string,
-	args: string[],
-	signal?: AbortSignal,
-): Promise<string> {
-	const chunks: Uint8Array[] = [];
-	const result = await spawnGit(root, args, {
-		onStdout: (c) => chunks.push(c),
-		signal,
-	});
-	if (result.code !== 0) {
-		throw new Error(`git ${args[0]} failed: ${result.stderr}`);
-	}
-	return decodeChunks(chunks);
 }
 
 /** Undo git's C-style path quoting (core.quotePath): `"a/\303\251x"`
@@ -201,16 +156,4 @@ export function parsePatchStats(patch: string): DiffFile[] {
 	}
 	flush();
 	return files;
-}
-
-export async function diff(
-	root: string,
-	options: DiffOptions = {},
-): Promise<DiffResult> {
-	const patch = await collectText(
-		root,
-		["diff", "--no-color", ...rangeArgs(options), ...pathArgs(options)],
-		options.signal,
-	);
-	return { files: parsePatchStats(patch), patch };
 }

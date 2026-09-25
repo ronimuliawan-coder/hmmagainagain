@@ -99,15 +99,22 @@ jobs:
           cache-dependency-path: tauri/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Set up Bun (root web UI build)
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.0"
+
       - name: Cache cargo build artifacts
         # NOTE: never cache ~/.cargo itself — the mount shadows the
         # just-installed toolchain (rustup + cargo vanish for later steps).
         # Cache only the registry downloads and the build tree. apt joins
-        # the list so the webview headers below install from cache.
+        # the list so the webview headers below install from cache; bun
+        # covers the root web install below (bun must be set up first).
         uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1
         with:
           cache: |
             apt
+            bun
           path: |
             ~/.cargo/registry
             tauri/src-tauri/target
@@ -128,6 +135,11 @@ jobs:
       - name: Install frontend dependencies
         working-directory: tauri
         run: npm ci
+
+      - name: Install root web dependencies
+        # Runs at the workspace root (no working-directory): the shell's
+        # beforeBuildCommand builds the real UI from there.
+        run: bun install --frozen-lockfile
 
       - name: Build bundle
         # CI-only profile relief: the shipped profile (lto=true,
@@ -178,12 +190,29 @@ jobs:
           cache-dependency-path: tauri/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Set up Bun (root web UI build)
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.0"
+
       - name: Verify Rust toolchain
         run: cargo --version && rustc --version
+
+      - name: Set up sccache (shared compile cache)
+        # Cold ephemeral runners recompile all ~200 crates every run (~8
+        # min on 2 cores). sccache backs the compile cache on the GHA
+        # cache, so only changed crates rebuild. Windows-only for now:
+        # Linux/macOS ride warm nscloud target/ volumes instead.
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
 
       - name: Install frontend dependencies
         working-directory: tauri
         run: npm ci
+
+      - name: Install root web dependencies
+        # Runs at the workspace root (no working-directory): the shell's
+        # beforeBuildCommand builds the real UI from there.
+        run: bun install --frozen-lockfile
 
       - name: Build bundle
         # Same CI-only profile relief as Linux; shipped profile untouched.
@@ -192,8 +221,14 @@ jobs:
         env:
           CARGO_PROFILE_RELEASE_LTO: "false"
           CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "4"
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: "sccache"
         working-directory: tauri
         run: npx tauri build
+
+      - name: Show sccache stats
+        shell: bash
+        run: ${SCCACHE_PATH} --show-stats
 
       - name: Report bundle
         # Script file, not `node -e`: PowerShell mangles inline backticks
@@ -229,6 +264,11 @@ jobs:
           cache-dependency-path: tauri/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Set up Bun (root web UI build)
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.0"
+
       - name: Cache cargo build artifacts
         # Same never-cache-~/.cargo rule as Linux (a mount would shadow
         # the just-installed toolchain). Unsigned build: no Apple
@@ -245,6 +285,11 @@ jobs:
       - name: Install frontend dependencies
         working-directory: tauri
         run: npm ci
+
+      - name: Install root web dependencies
+        # Runs at the workspace root (no working-directory): the shell's
+        # beforeBuildCommand builds the real UI from there.
+        run: bun install --frozen-lockfile
 
       - name: Build bundle
         # Same CI-only profile relief as Linux; shipped profile untouched.

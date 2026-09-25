@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type DiffFile, diff, parsePatchStats, unquotePath } from "./diff";
+import { type DiffFile, parsePatchStats, unquotePath } from "./diff-parse";
 
 const base = mkdtempSync(join(tmpdir(), "hmmagainagain-a1-"));
 const ENV = {
@@ -86,9 +86,9 @@ const byPath = (files: DiffFile[]): DiffFile[] =>
 	[...files].sort((a, b) => (a.path < b.path ? -1 : 1));
 
 /** Assert patch-derived stats equal live numstat, same traversal order. */
-async function expectParity(dir: string): Promise<void> {
-	const result = await diff(dir, {});
-	expect(byPath(result.files)).toEqual(byPath(numstatFiles(dir)));
+function expectParity(dir: string): void {
+	const patch = g(dir, "diff", "--no-color");
+	expect(byPath(parsePatchStats(patch))).toEqual(byPath(numstatFiles(dir)));
 }
 
 describe("parsePatchStats differential vs git numstat", () => {
@@ -97,7 +97,7 @@ describe("parsePatchStats differential vs git numstat", () => {
 		writeFileSync(join(dir, "a.txt"), "one\ntwo\n");
 		commitAll(dir, "base");
 		writeFileSync(join(dir, "a.txt"), "one\nTWO\nthree\n");
-		await expectParity(dir);
+		expectParity(dir);
 	});
 
 	test("rename with modifications", async () => {
@@ -106,7 +106,7 @@ describe("parsePatchStats differential vs git numstat", () => {
 		commitAll(dir, "base");
 		execFileSync("git", ["-C", dir, "mv", "old.txt", "new.txt"]);
 		writeFileSync(join(dir, "new.txt"), "same\nchanged\n");
-		await expectParity(dir);
+		expectParity(dir);
 	});
 
 	test("binary add and modify", async () => {
@@ -116,7 +116,7 @@ describe("parsePatchStats differential vs git numstat", () => {
 		writeFileSync(join(dir, "blob.bin"), Buffer.from([0, 1, 2, 3, 4, 5]));
 		writeFileSync(join(dir, "new.bin"), Buffer.from([9, 9, 9]));
 		execFileSync("git", ["-C", dir, "add", "-A"]);
-		await expectParity(dir);
+		expectParity(dir);
 	});
 
 	test("CRLF content", async () => {
@@ -124,7 +124,7 @@ describe("parsePatchStats differential vs git numstat", () => {
 		writeFileSync(join(dir, "dos.txt"), "a\r\nb\r\n");
 		commitAll(dir, "base");
 		writeFileSync(join(dir, "dos.txt"), "a\r\nB\r\nc\r\n");
-		await expectParity(dir);
+		expectParity(dir);
 	});
 
 	test("unicode paths", async () => {
@@ -132,7 +132,7 @@ describe("parsePatchStats differential vs git numstat", () => {
 		writeFileSync(join(dir, "ünïcödé 😀.txt"), "v1\n");
 		commitAll(dir, "base");
 		writeFileSync(join(dir, "ünïcödé 😀.txt"), "v1\nv2\n");
-		await expectParity(dir);
+		expectParity(dir);
 	});
 
 	test("paths with spaces (b-side tokenizing trap)", async () => {
@@ -140,7 +140,7 @@ describe("parsePatchStats differential vs git numstat", () => {
 		writeFileSync(join(dir, "staged new file.txt"), "v1\n");
 		commitAll(dir, "base");
 		writeFileSync(join(dir, "staged new file.txt"), "v1\nv2\n");
-		await expectParity(dir);
+		expectParity(dir);
 	});
 
 	test("mode-only change yields zero counts", async () => {
@@ -148,14 +148,14 @@ describe("parsePatchStats differential vs git numstat", () => {
 		writeFileSync(join(dir, "run.sh"), "x\n");
 		commitAll(dir, "base");
 		execFileSync("git", ["-C", dir, "update-index", "--chmod=+x", "run.sh"]);
-		await expectParity(dir);
+		expectParity(dir);
 	});
 
 	test("empty diff yields no files", async () => {
 		const dir = initRepo("empty");
 		writeFileSync(join(dir, "a.txt"), "x\n");
 		commitAll(dir, "base");
-		await expectParity(dir);
+		expectParity(dir);
 	});
 });
 
@@ -175,14 +175,5 @@ describe("unquotePath", () => {
 describe("parsePatchStats", () => {
 	test("empty patch yields no files", () => {
 		expect(parsePatchStats("")).toEqual([]);
-	});
-
-	test("aborted signal rejects instead of running git", async () => {
-		const dir = initRepo("abort");
-		writeFileSync(join(dir, "a.txt"), "x\n");
-		commitAll(dir, "base");
-		const controller = new AbortController();
-		controller.abort();
-		await expect(diff(dir, { signal: controller.signal })).rejects.toThrow();
 	});
 });

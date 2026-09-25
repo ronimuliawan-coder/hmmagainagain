@@ -265,3 +265,179 @@ pub async fn git_remote_result(
 		stderr,
 	})
 }
+
+// Golden behavior ported from the Bun adapter's U7 suite (deleted at M6
+// cutover with the engine): push advances the remote ref, pull
+// fast-forwards, diverged pull fails without moving anything, first push
+// -u sets upstream tracking. File-path remotes exercise the same transport
+// code as network ones, minus credentials.
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn git(dir: &std::path::Path, args: &[&str]) -> std::process::Output {
+		crate::git::git_command()
+			.args(args)
+			.current_dir(dir)
+			.env("GIT_CONFIG_NOSYSTEM", "1")
+			.env("GIT_AUTHOR_NAME", "t")
+			.env("GIT_AUTHOR_EMAIL", "t@t")
+			.env("GIT_COMMITTER_NAME", "t")
+			.env("GIT_COMMITTER_EMAIL", "t@t")
+			.output()
+			.expect("git spawn")
+	}
+
+	fn fixture() -> (std::path::PathBuf, std::path::PathBuf) {
+		let base = std::env::temp_dir().join(format!(
+			"tauri-remote-fixture-{}",
+			std::time::SystemTime::now()
+				.duration_since(std::time::UNIX_EPOCH)
+				.map(|d| d.as_nanos())
+				.unwrap_or(0)
+		));
+		let origin = base.join("origin.git");
+		let work = base.join("work");
+		std::fs::create_dir_all(&origin).unwrap();
+		// -b main: clones land on main automatically (origin HEAD exists
+		// from the start, even while the repo is still empty).
+		assert!(git(&origin, &["init", "--bare", "-q", "-b", "main"]).status.success());
+		assert!(
+			git(&std::env::temp_dir(), &[
+				"clone",
+				"-q",
+				&origin.to_string_lossy(),
+				&work.to_string_lossy()
+			])
+			.status
+			.success()
+		);
+		assert!(git(&work, &["config", "user.email", "t@t"]).status.success());
+		assert!(git(&work, &["config", "user.name", "t"]).status.success());
+		// The origin is empty, so the clone checks out nothing: start the
+		// work branch explicitly instead of inheriting ambient init.defaultBranch.
+		assert!(git(&work, &["checkout", "-qb", "main"]).status.success());
+		(origin, work)
+	}
+
+	fn run_argv(dir: &std::path::Path, argv: &[String]) -> bool {
+		git(
+			dir,
+			&argv.iter().map(String::as_str).collect::<Vec<_>>(),
+		)
+		.status
+		.success()
+	}
+
+	#[test]
+	fn argv_shapes_match_bun_contract() {
+		assert_eq!(
+			op_argv("fetch", "origin", &None, false).unwrap(),
+			vec!["fetch", "--progress", "origin"]
+		);
+		assert_eq!(
+			op_argv("push", "origin", &None, false).unwrap(),
+			vec!["push", "--progress", "origin", "HEAD"]
+		);
+		assert_eq!(
+			op_argv("push", "origin", &Some("main".to_string()), true).unwrap(),
+			vec!["push", "--progress", "-u", "origin", "main"]
+		);
+		assert_eq!(
+			op_argv("pull", "origin", &None, false).unwrap(),
+			vec!["pull", "--progress", "--ff-only", "origin"]
+		);
+		assert!(op_argv("bogus", "origin", &None, false).is_err());
+		assert!(op_argv("fetch", "-h", &None, false).is_err());
+		assert!(
+			op_argv("push", "origin", &Some("-D".to_string()), false).is_err()
+		);
+	}
+
+	#[test]
+	fn push_advances_remote_pull_fast_forwards() {
+		let (origin, work) = fixture();
+		std::fs::write(work.join("a.txt"), "one\n").unwrap();
+		assert!(git(&work, &["add", "-A"]).status.success());
+		assert!(git(&work, &["commit", "-qm", "base"]).status.success());
+		let argv =
+			op_argv("push", "origin", &Some("main".to_string()), true).unwrap();
+		assert!(run_argv(&work, &argv));
+		// Remote ref advanced to the pushed commit.
+		let head = git(&work, &["rev-parse", "HEAD"]).stdout;
+		let remote = git(&origin, &["rev-parse", "refs/heads/main"]).stdout;
+		assert_eq!(head, remote);
+		// Upstream tracking set by the first -u push.
+		let upstream = git(&work, &[
+			"rev-parse",
+			"--abbrev-ref",
+			"--symbolic-full-name",
+			"@{u}"
+		]);
+		assert!(upstream.status.success());
+		// A fresh clone pulls the commit (fast-forward from unborn HEAD).
+		let second = work.parent().unwrap().join("second");
+		assert!(
+			git(&std::env::temp_dir(), &[
+				"clone",
+				"-q",
+				&origin.to_string_lossy(),
+				&second.to_string_lossy()
+			])
+			.status
+			.success()
+		);
+		assert_eq!(git(&second, &["rev-parse", "HEAD"]).stdout, head);
+		// Advance the origin, then pull for real: the ff-only argv must
+		// fast-forward the second clone onto the new commit.
+		std::fs::write(work.join("b.txt"), "two\n").unwrap();
+		assert!(git(&work, &["add", "-A"]).status.success());
+		assert!(git(&work, &["commit", "-qm", "second"]).status.success());
+		let push_argv =
+			op_argv("push", "origin", &Some("main".to_string()), false).unwrap();
+		assert!(run_argv(&work, &push_argv));
+		let pull_argv = op_argv("pull", "origin", &None, false).unwrap();
+		assert!(run_argv(&second, &pull_argv));
+		assert_eq!(
+			git(&second, &["rev-parse", "HEAD"]).stdout,
+			git(&work, &["rev-parse", "HEAD"]).stdout
+		);
+	}
+
+	#[test]
+	fn diverged_pull_fails_without_moving() {
+		let (origin, work) = fixture();
+		std::fs::write(work.join("a.txt"), "one\n").unwrap();
+		assert!(git(&work, &["add", "-A"]).status.success());
+		assert!(git(&work, &["commit", "-qm", "base"]).status.success());
+		let argv =
+			op_argv("push", "origin", &Some("main".to_string()), true).unwrap();
+		assert!(run_argv(&work, &argv));
+		// Diverge both sides.
+		std::fs::write(work.join("a.txt"), "local\n").unwrap();
+		assert!(git(&work, &["commit", "-qam", "local"]).status.success());
+		let other = work.parent().unwrap().join("other");
+		assert!(
+			git(&std::env::temp_dir(), &[
+				"clone",
+				"-q",
+				&origin.to_string_lossy(),
+				&other.to_string_lossy()
+			])
+			.status
+			.success()
+		);
+		assert!(git(&other, &["config", "user.email", "t@t"]).status.success());
+		assert!(git(&other, &["config", "user.name", "t"]).status.success());
+		std::fs::write(other.join("a.txt"), "remote\n").unwrap();
+		assert!(git(&other, &["commit", "-qam", "remote"]).status.success());
+	 let push_argv =
+			op_argv("push", "origin", &Some("main".to_string()), false).unwrap();
+		assert!(run_argv(&other, &push_argv));
+		// ff-only pull refuses the diverged state; local HEAD unmoved.
+		let before = git(&work, &["rev-parse", "HEAD"]).stdout;
+		let pull_argv = op_argv("pull", "origin", &None, false).unwrap();
+		assert!(!run_argv(&work, &pull_argv));
+		assert_eq!(git(&work, &["rev-parse", "HEAD"]).stdout, before);
+	}
+}
