@@ -216,12 +216,17 @@ pub async fn git_remote_result(
 				break;
 			}
 			pending.extend_from_slice(&chunk[..n]);
-			while let Some(pos) =
-				pending.iter().position(|b| *b == b'\r' || *b == b'\n')
+			// Scan with a cursor and compact once per read: draining the
+			// front per delimiter shifts the whole remaining buffer for
+			// every progress line.
+			let mut start = 0;
+			while let Some(rel) = pending[start..]
+				.iter()
+				.position(|b| *b == b'\r' || *b == b'\n')
 			{
-				let raw: Vec<u8> = pending.drain(..=pos).collect();
+				let end = start + rel;
 				let line =
-					String::from_utf8_lossy(&raw[..raw.len() - 1]).into_owned();
+					String::from_utf8_lossy(&pending[start..end]).into_owned();
 				full.push_str(&line);
 				full.push('\n');
 				let _ = app.emit(
@@ -232,7 +237,9 @@ pub async fn git_remote_result(
 						line: format!("{line}\n"),
 					},
 				);
+				start = end + 1;
 			}
+			pending.drain(..start);
 		}
 		if !pending.is_empty() {
 			let rest = String::from_utf8_lossy(&pending).into_owned();
