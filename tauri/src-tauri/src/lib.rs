@@ -25,6 +25,7 @@ pub fn run() {
 			git::git_branches,
 			git::git_create_branch,
 			git::git_switch_branch,
+			git::git_switch_remote_branch,
 			git::stage_paths,
 			git::unstage_paths,
 			git::apply_index_patch,

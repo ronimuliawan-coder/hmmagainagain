@@ -1012,6 +1012,7 @@ function refreshBranches(): void {
 				option.value = branch.name;
 				option.textContent = branch.current ? `● ${branch.name}` : branch.name;
 				if (branch.current) option.selected = true;
+				if (branch.remote === true) option.dataset.remote = "true";
 				branchSelect.appendChild(option);
 			}
 		})
@@ -1094,8 +1095,12 @@ branchSelect.addEventListener("change", () => {
 	const { root } = store.get();
 	const name = branchSelect.value;
 	if (!root || !name) return;
-	void getPlatform()
-		.gitSwitchBranch(root, name)
+	const remote = branchSelect.selectedOptions[0]?.dataset.remote === "true";
+	void (
+		remote
+			? getPlatform().gitSwitchRemoteBranch(root, name)
+			: getPlatform().gitSwitchBranch(root, name)
+	)
 		.then(() => afterWorktreeChange())
 		.catch(showWriteError);
 });

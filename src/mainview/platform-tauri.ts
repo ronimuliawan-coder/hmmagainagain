@@ -267,6 +267,10 @@ export function createTauriPlatform(): Platform {
 			}).then(() => undefined),
 		gitSwitchBranch: (root: string, name: string): Promise<void> =>
 			invoke<void>("git_switch_branch", { root, name }).then(() => undefined),
+		gitSwitchRemoteBranch: (root: string, remoteRef: string): Promise<void> =>
+			invoke<void>("git_switch_remote_branch", { root, remoteRef }).then(
+				() => undefined,
+			),
 		gitRemote: (
 			root: string,
 			op: "fetch" | "push" | "pull",
