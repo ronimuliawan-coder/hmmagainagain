@@ -214,17 +214,41 @@ function renderRepoInfo(info: RepoInfo, status: GitStatus): void {
 }
 
 /** Single render path: every state change paints through here. */
+let lastStatusKey: string | null = null;
+const statusKey = (
+	entries: readonly {
+		path: string;
+		indexStatus: string;
+		worktreeStatus: string;
+		renamedFrom?: string;
+	}[],
+): string =>
+	entries
+		.map(
+			(e) =>
+				`${e.path}:${e.indexStatus}:${e.worktreeStatus}:${e.renamedFrom ?? ""}`,
+		)
+		.join("\n");
+
 function render(state: AppState): void {
 	renderWelcome(state.root);
 	if (state.status) {
-		renderStatusList(statusList, state.status.entries, {
-			onToggle: (path, unstage, renamedFrom) =>
-				void runWriteAction(path, unstage, renamedFrom),
-			onJump: (path) => diffView?.scrollToFile(path),
-			onToggleAll: (unstage) =>
-				void runBulkWrite(state.status?.entries ?? [], unstage),
-		});
-		tree?.setGitStatus(statusToTreeEntries(state.status.entries));
+		// Watcher refreshes fire on background churn (editors rewriting
+		// generated files); rebuilding the list each time flickers hover
+		// under a stationary cursor. Identical entries repaint identically,
+		// so skip the rebuild — and the tree decoration pass with it.
+		const key = statusKey(state.status.entries);
+		if (key !== lastStatusKey) {
+			lastStatusKey = key;
+			renderStatusList(statusList, state.status.entries, {
+				onToggle: (path, unstage, renamedFrom) =>
+					void runWriteAction(path, unstage, renamedFrom),
+				onJump: (path) => diffView?.scrollToFile(path),
+				onToggleAll: (unstage) =>
+					void runBulkWrite(state.status?.entries ?? [], unstage),
+			});
+			tree?.setGitStatus(statusToTreeEntries(state.status.entries));
+		}
 	}
 	if (state.info && state.status) renderRepoInfo(state.info, state.status);
 	if (state.status) {
