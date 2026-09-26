@@ -400,6 +400,16 @@ textarea {
 #branch-select {
 	margin-bottom: 6px;
 	width: 100%;
+	/* Native GTK combos render chunky against the compact chrome: take over
+	 * the box (the popup list stays native) to match the topbar pills. */
+	appearance: none;
+	-webkit-appearance: none;
+	padding: 3px 26px 3px 8px;
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2388898c' fill='none' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+	background-repeat: no-repeat;
+	background-position: right 8px center;
+	cursor: pointer;
+	text-overflow: ellipsis;
 }
 
 #branch-create-row {
