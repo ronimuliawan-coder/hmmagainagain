@@ -1,13 +1,19 @@
 // Platform contract — the seam between the UI and everything OS-specific.
-// Both platform implementations (fake, Bun main-process, and the RPC client used
-// by the webview) must satisfy `Platform` and pass the shared conformance suite.
+// Implementations (Tauri bridge, fake fixture for plain browsers) must
+// satisfy `Platform` and pass the shared conformance suite.
 // See docs/GOVERNANCE.md invariants: argv-only git, cwd pinned to the repo root.
 
-import type { RPCSchema } from "electrobun/main";
-import type { BranchInfo } from "../bun/git/branches";
-import type { DiffResult } from "../bun/git/diff";
-import type { LogCommit } from "../bun/git/log";
-import type { GitStatus } from "../bun/git/status-parser";
+import type { DiffResult } from "./git/diff-parse";
+import type { LogCommit } from "./git/log-parse";
+import type { GitStatus } from "./git/status-parser";
+
+/** Branch listing entry (local or remote-tracking). */
+export interface BranchInfo {
+	name: string;
+	oid: string;
+	current: boolean;
+	upstream?: string;
+}
 
 export interface RepoInfo {
 	root: string;
@@ -51,14 +57,19 @@ export interface GitDiffOptions {
 
 /**
  * The UI never touches Node/Bun/Electron APIs directly — only this interface.
- * `openRepo` is intentionally absent: Electrobun 2.0.1 ships no native
- * open-directory dialog (devkit audit, RON-294). Until one exists upstream or a
- * custom picker lands (U3), the webview supplies a path to `readRepo`.
+ * `openRepo` is intentionally absent: Electrobun 2.0.1 ships no webview-side
+ * open-directory dialog (devkit audit, RON-294). Folder picking crosses as
+ * `pickDirectory` instead (native GtkFileChooserNative folder mode via the
+ * main-process Utils, RON-324); the webview still supplies the path to
+ * `readRepo`, which validates it.
  */
 export interface Platform {
-	readonly kind: "fake" | "bun" | "rpc";
+	readonly kind: "fake" | "bun" | "rpc" | "tauri";
 	/** Validates the path is a git worktree; rejects (throws) otherwise. */
 	readRepo(root: string): Promise<RepoInfo>;
+	/** Native folder picker; resolves null when the user cancels. The fake
+	 * (plain-browser dev) has no native dialog and always resolves null. */
+	pickDirectory(): Promise<string | null>;
 	/**
 	 * Runs git in the repo. args must NOT include the git binary name.
 	 * Implementations enforce argv-array spawning (no shell), cwd = root.
@@ -127,127 +138,10 @@ export interface Platform {
 	commit(root: string, message: string): Promise<void>;
 }
 
-// ---- RPC transport schema (Electrobun typed RPC, used by the webview client) ----
-// Contract semantics: `bun.requests` are answered by the main process;
-// `webview.messages` are sent main → webview (stream chunks / fs events).
-// Streaming runs use a start / chunk / exit + abort protocol because Electrobun
-// RPC requests are single-response.
-
-export interface RpcRunStartParams {
-	root: string;
-	args: string[];
-}
-
-export type PlatformRPCSchema = {
-	bun: RPCSchema<{
-		requests: {
-			readRepo: { params: { root: string }; response: RepoInfo };
-			watchStart: { params: { root: string }; response: { watchId: number } };
-			watchStop: { params: { watchId: number }; response: { ok: boolean } };
-			runGitStart: { params: RpcRunStartParams; response: { runId: number } };
-			runGitAbort: { params: { runId: number }; response: { ok: boolean } };
-			// GitAdapter read paths (U2). ok=false carries a user-facing error.
-			gitStatus: {
-				params: { root: string };
-				response: { ok: boolean; status?: GitStatus; error?: string };
-			};
-			// Diff runs start/abort separately (A2) so superseded diffs die
-			// instead of racing; completion arrives as gitDiffDone.
-			gitDiffStart: {
-				params: { root: string; from?: string; to?: string; staged?: boolean };
-				response: { diffId: number };
-			};
-			gitDiffAbort: { params: { diffId: number }; response: { ok: boolean } };
-			gitLogStart: {
-				params: { root: string; limit?: number; skip?: number; range?: string };
-				response: { logId: number };
-			};
-			gitLogAbort: { params: { logId: number }; response: { ok: boolean } };
-			gitWorktreePaths: {
-				params: { root: string };
-				response: { ok: boolean; paths?: string[]; error?: string };
-			};
-			gitBranches: {
-				params: { root: string };
-				response: { ok: boolean; branches?: BranchInfo[]; error?: string };
-			};
-			gitCreateBranch: {
-				params: { root: string; name: string; switchTo?: boolean };
-				response: { ok: boolean; error?: string };
-			};
-			gitSwitchBranch: {
-				params: { root: string; name: string };
-				response: { ok: boolean; error?: string };
-			};
-			gitRemoteStart: {
-				params: {
-					root: string;
-					op: "fetch" | "push" | "pull";
-					remote: string;
-					branch?: string;
-					setUpstream?: boolean;
-				};
-				response: { opId: number };
-			};
-			gitRemoteAbort: { params: { opId: number }; response: { ok: boolean } };
-			// Write paths (U5). ok=false carries git's stderr verbatim.
-			stagePaths: {
-				params: { root: string; paths: string[] };
-				response: { ok: boolean; error?: string };
-			};
-			unstagePaths: {
-				params: { root: string; paths: string[] };
-				response: { ok: boolean; error?: string };
-			};
-			applyIndexPatch: {
-				params: { root: string; patch: string };
-				response: { ok: boolean; error?: string };
-			};
-			commit: {
-				params: { root: string; message: string };
-				response: { ok: boolean; error?: string };
-			};
-		};
-		messages: {
-			/** Webview → main: result payload of the SMOKE self-test (SMOKE=1). */
-			selfTestResult: { ok: boolean; detail: string };
-		};
-	}>;
-	webview: RPCSchema<{
-		// biome-ignore lint/complexity/noBannedTypes: empty side = answers no requests (upstream-idiomatic)
-		requests: {};
-		messages: {
-			fsEvents: { watchId: number; batch: FsEventBatch };
-			/** data is base64-encoded chunk bytes. */
-			gitChunk: { runId: number; stream: "stdout" | "stderr"; data: string };
-			gitExit: {
-				runId: number;
-				code: number | null;
-				signal: string | null;
-				stderr: string;
-			};
-			/** Main → webview (SMOKE=1 only): run the platform self-test against root.
-			 * `stage` (SMOKE_STAGE=1) adds the fixture-only staging/commit flow. */
-			selfTestRun: { root: string; stage?: boolean; branch?: boolean };
-			gitLogCommit: { logId: number; commit: LogCommit };
-			gitLogDone: { logId: number; ok: boolean; count: number; error?: string };
-			gitDiffDone: {
-				diffId: number;
-				ok: boolean;
-				result?: DiffResult;
-				stderr: string;
-			};
-			gitRemoteLine: { opId: number; line: string };
-			gitRemoteDone: { opId: number; ok: boolean; stderr: string };
-		};
-	}>;
-};
-
-export type { BranchInfo } from "../bun/git/branches";
-export type { DiffFile, DiffResult } from "../bun/git/diff";
-export type { LogCommit } from "../bun/git/log";
+export type { DiffFile, DiffResult } from "./git/diff-parse";
+export type { LogCommit } from "./git/log-parse";
 export type {
 	GitBranchInfo,
 	GitStatus,
 	StatusEntry,
-} from "../bun/git/status-parser";
+} from "./git/status-parser";

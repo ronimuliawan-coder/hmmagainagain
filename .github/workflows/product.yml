@@ -1,12 +1,11 @@
-# Product CI on Namespace runners (RON-316): the full local gate plus a
-# Linux stable build, on every push and pull request. Single job (one queue,
-# one checkout, one install) with a warm cache volume — faster than split
-# jobs on ephemeral runners.
+# Product CI on Namespace runners (RON-316, gate-only since M6): typecheck +
+# biome + bun test on every push and pull request. The shipped bundles moved
+# to the tauri workflow with the M6 cutover — this lane no longer builds.
 #
 # Runner choice is raw Namespace labels (no dashboard profile dependency).
-# Shape 4x8: this workload (tsc/biome/tests/vite/zstd) is single-threaded
+# Shape 4x8: this workload (tsc/biome/tests) is single-threaded
 # bound — 8x16 doubles cost for no measurable gain. Cache volume carries
-# bun/apt/toolchain/hutch caches; git mirrors skip the full clone.
+# bun/apt caches; git mirrors skip the full clone.
 # Ubuntu-only: Windows/macOS distribution is post-v1, so a wider matrix
 # would be decorative, not coverage. No secrets.
 
@@ -26,8 +25,32 @@ concurrency:
 permissions: {}
 
 jobs:
+  # A push to a PR branch would otherwise run this workflow twice (push +
+  # pull_request events, same head). When an open PR already covers the
+  # branch, the PR run does the work and the push run stands down. Tiny
+  # github-hosted check; the heavy job keeps its Namespace runner.
+  dedupe:
+    name: skip push when a PR covers it
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      run-ci: ${{ steps.check.outputs.run-ci }}
+    steps:
+      # Local action: the repo must be present first (sparse: just this).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions/pr-dedupe
+      - id: check
+        uses: ./.github/actions/pr-dedupe
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
   gate-and-build:
-    name: gate + Linux stable build
+    name: gate (tsc + biome + bun test)
+    needs: dedupe
+    if: needs.dedupe.outputs.run-ci == 'true'
     runs-on:
       - nscloud-ubuntu-24.04-amd64-4x8-with-cache
       - nscloud-cache-size-20gb
@@ -49,49 +72,21 @@ jobs:
         with:
           bun-version: "1.4.0"
 
-      - name: Set up Namespace caches (bun + apt + hutch toolchains)
+      - name: Set up Namespace caches (bun + apt)
         uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1
         with:
           cache: |
             bun
             apt
-          # Whole ~/.hutch home (not subpaths): the install marker lives at
-          # its root, and mounting only subdirs leaves an unmarked home the
-          # installer refuses to claim. Version upgrades need a cache bust.
-          path: |
-            ~/.hutch
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Install Hutch
-        run: |
-          # PATH first: a cache-restored hutch must be found, or the
-          # installer refuses to claim the pre-existing ~/.hutch home.
-          echo "$HOME/.hutch/bin" >> "$GITHUB_PATH"
-          export PATH="$HOME/.hutch/bin:$PATH"
-          command -v hutch >/dev/null || curl -fsSL https://hutch.blackboard.sh/hutch/install.sh | sh
-
-      - name: Prepare Electrobun devkit
-        # Generates .hutch/devkit (tsconfig base + electrobun types) that
-        # tsconfig.json extends and tsc requires. Gitignored by design.
-        run: hutch electrobun prepare
-
       - name: Gate (tsc + biome + bun test)
         run: bun run check
 
-      - name: Install system webview headers
-        run: |
-          dpkg -s libwebkit2gtk-4.1-dev >/dev/null 2>&1 || {
-            sudo apt-get update -qq
-            sudo apt-get install -qy libwebkit2gtk-4.1-dev
-          }
-
-      - name: Stable build
-        run: hutch run build
-
-      - name: Report payload
-        run: |
-          payload="$(ls build/stable-linux-x64/hmmagainagain/Resources/*.tar.zst | head -1)"
-          bytes="$(stat -c %s "$payload")"
-          echo "payload=$payload bytes=$bytes ($(awk "BEGIN {printf \"%.1f\", $bytes/1024/1024}") MiB)"
+      - name: Build web UI
+        # Cheap shell-proof: the Tauri matrix only rebuilds the UI when
+        # tauri/ changes, so a UI-only breakage would otherwise go
+        # unnoticed until a tauri-touching PR. This catches it on every PR.
+        run: bun run build:web

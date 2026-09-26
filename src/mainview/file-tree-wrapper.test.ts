@@ -133,4 +133,73 @@ describe("mountFileTree (component, jsdom)", () => {
 		expect(() => tree.destroy()).not.toThrow();
 		container.remove();
 	});
+
+	test("setSearch filters rows through the search session", async () => {
+		const { container, tree } = mount();
+		tree.setPaths(FIXTURE_PATHS);
+		await flushDom();
+		const before = tree.getRowCount();
+		tree.setSearch("Button");
+		await flushDom();
+		expect(tree.getRowCount()).toBeLessThan(before);
+		expect(tree.getRowCount()).toBeGreaterThan(0);
+		tree.setSearch(null);
+		await flushDom();
+		expect(tree.getRowCount()).toBe(before);
+		tree.destroy();
+		container.remove();
+	});
+
+	test("collapseAll folds to roots, expandAll restores, decorations kept", async () => {
+		const { container, tree } = mount();
+		tree.setPaths(FIXTURE_PATHS);
+		tree.setGitStatus([
+			{ path: "src/index.ts", status: "modified" },
+			{ path: "README.md", status: "untracked" },
+		]);
+		await flushDom();
+		const full = tree.getRowCount();
+
+		tree.collapseAll();
+		await flushDom();
+		const folded = tree.getRowCount();
+		expect(folded).toBeGreaterThan(0);
+		expect(folded).toBeLessThan(full);
+		// The folded folder still carries its change marker (RON-382).
+		const shadow = shadowRootOf(container);
+		expect(
+			shadow
+				.querySelector('[data-item-path="src/"]')
+				?.getAttribute("data-item-contains-git-change"),
+		).toBe("true");
+
+		tree.expandAll();
+		await flushDom();
+		expect(tree.getRowCount()).toBe(full);
+		expect(
+			shadowRootOf(container)
+				.querySelector('[data-item-path="src/index.ts"]')
+				?.getAttribute("data-item-git-status"),
+		).toBe("modified");
+		tree.destroy();
+		container.remove();
+	});
+
+	test("built-in search box stays hidden while the session filters", async () => {
+		const { container, tree } = mount();
+		tree.setPaths(FIXTURE_PATHS);
+		await flushDom();
+		// Our own filter box drives the session; the component's box must
+		// not render a second one (RON-329).
+		const shadow = shadowRootOf(container);
+		const unsafe = shadow.querySelector("style[data-file-tree-unsafe-css]");
+		expect(unsafe?.textContent).toContain("[data-file-tree-search-container]");
+		// The session itself still works through setSearch.
+		const before = tree.getRowCount();
+		tree.setSearch("Button");
+		await flushDom();
+		expect(tree.getRowCount()).toBeLessThan(before);
+		tree.destroy();
+		container.remove();
+	});
 });

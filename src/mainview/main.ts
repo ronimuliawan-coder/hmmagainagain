@@ -1,10 +1,12 @@
 import "./style.css";
+import { themeToTreeStyles } from "@pierre/trees";
 import type {
 	GitDiffOptions,
 	GitStatus,
 	LogCommit,
 	RepoInfo,
 } from "../shared/platform";
+import { deriveChromeTokens } from "./chrome-tokens";
 import {
 	type DiffStyle,
 	type DiffViewHandle,
@@ -14,12 +16,24 @@ import { mountFileTree, type TreeHandle } from "./file-tree-wrapper";
 import { statusToTreeEntries } from "./git-status-mapping";
 import { FALLBACK_ROW_HEIGHT, windowRows } from "./history-window";
 import { buildStagedPatch } from "./patch-surgery";
-import {
-	getPlatform,
-	getPlatformLoadError,
-	sendSelfTestResult,
-} from "./platform";
+import { getPlatform, isTauri } from "./platform";
+import { enableSmoothWheel } from "./smooth-wheel";
+import { staticTheme } from "./static-themes";
+import { isStagedStatus, renderStatusList } from "./status-list";
 import { createStore } from "./store";
+import {
+	cycleThemeVariant,
+	knownThemeNames,
+	parseStoredTheme,
+	pierreThemeName,
+	type ShellTheme,
+	themeVariantLabel,
+	themeVariantTitle,
+} from "./theme-names";
+
+// Mouse-wheel input arrives notched; WebKit applies it as instant jumps.
+// Glide it instead (touchpads, pinch-zoom, and reduced-motion stay native).
+enableSmoothWheel();
 
 // U8b cold-start proxy: first compositor frame in the webview, on the shared
 // Date.now wall clock. Surfaces in main-process output only if Electrobun
@@ -30,6 +44,8 @@ requestAnimationFrame(() => {
 });
 
 const RECENTS_KEY = "hmmagainagain.recents";
+const THEME_KEY = "hmmagainagain.theme";
+const TAB_KEY = "hmmagainagain.sidebar-tab";
 const REFRESH_DEBOUNCE_MS = 300;
 
 /** Fail-fast lookup: a missing id is a template/TS mismatch, not a runtime case. */
@@ -39,26 +55,26 @@ function byId<T extends HTMLElement>(id: string): T {
 	return element as T;
 }
 
-// Porcelain letters (?, ., !) can't be CSS class names — slug them instead.
-const STATUS_SLUGS: Record<string, string> = {
-	M: "m",
-	A: "a",
-	D: "d",
-	R: "r",
-	C: "c",
-	U: "u",
-	"?": "untracked",
-	"!": "ignored",
-	".": "clean",
-};
-
-const statusSlug = (letter: string): string => STATUS_SLUGS[letter] ?? "other";
-
 const treeContainer = byId<HTMLDivElement>("tree-container");
 const statusList = byId<HTMLUListElement>("status-list");
 const repoInfo = byId<HTMLSpanElement>("repo-info");
 const repoInput = byId<HTMLInputElement>("repo-path");
 const openBtn = byId<HTMLButtonElement>("open-btn");
+const browseBtn = byId<HTMLButtonElement>("browse-btn");
+const themeBtn = byId<HTMLButtonElement>("theme-btn");
+const themeStyleBtn = byId<HTMLButtonElement>("theme-style-btn");
+const treeFilter = byId<HTMLInputElement>("tree-filter");
+const treeToggleBtn = byId<HTMLButtonElement>("tree-toggle-btn");
+const welcome = byId<HTMLDivElement>("welcome");
+const welcomeRecents = byId<HTMLDivElement>("welcome-recents");
+const welcomeBrowse = byId<HTMLButtonElement>("welcome-browse");
+const diffToolbar = byId<HTMLDivElement>("diff-toolbar");
+const sidebarFooter = byId<HTMLElement>("sidebar-footer");
+const changesCount = byId<HTMLSpanElement>("changes-count");
+const tabButtons = [
+	...document.querySelectorAll<HTMLButtonElement>("#sidebar-tabs [data-tab]"),
+];
+const tabPanes = [...document.querySelectorAll<HTMLElement>("[data-tabpane]")];
 const diffContainer = byId<HTMLDivElement>("diff-container");
 const diffInfo = byId<HTMLSpanElement>("diff-info");
 const rangeButtons = [
@@ -76,7 +92,7 @@ const commitMessage = byId<HTMLTextAreaElement>("commit-message");
 const commitBtn = byId<HTMLButtonElement>("commit-btn");
 const stagedCount = byId<HTMLSpanElement>("staged-count");
 const writeError = byId<HTMLPreElement>("write-error");
-const historyList = byId<HTMLUListElement>("history-list");
+const historyList = byId<HTMLDivElement>("history-list");
 const branchSelect = byId<HTMLSelectElement>("branch-select");
 const branchName = byId<HTMLInputElement>("branch-name");
 const branchCreateBtn = byId<HTMLButtonElement>("branch-create-btn");
@@ -117,7 +133,7 @@ let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 // Guards against applying a stale diff response after a rapid range switch.
 let diffSeq = 0;
 let diffController: AbortController | null = null;
-// Stage timings of the last diff load — read by the SMOKE self-test.
+// Stage timings of the last diff load (perf telemetry for the budget).
 const diffTimings = { fetchMs: 0, parseMs: 0, files: 0 };
 // The patch behind the current diff view + the user's line selection in it —
 // the inputs to hunk staging (patch surgery).
@@ -167,16 +183,28 @@ function renderRecents(): void {
 }
 
 function renderRepoInfo(info: RepoInfo, status: GitStatus): void {
-	let badge = "";
+	repoInfo.innerHTML = "";
+	const branch = document.createElement("span");
+	branch.className = "repo-branch";
+	branch.textContent = info.branch;
+	const head = document.createElement("span");
+	head.className = "repo-head";
+	head.textContent = info.head.slice(0, 7);
+	const count = document.createElement("span");
+	count.className = "repo-count";
+	const total = status.entries.length;
+	count.textContent = total === 1 ? "1 change" : `${total} changes`;
+	repoInfo.append(branch, head, count);
 	const { ahead, behind } = status.branch;
-	if (ahead !== undefined && behind !== undefined) {
-		badge = ` · ↑${ahead} ↓${behind}`;
-	} else if (ahead !== undefined) {
-		badge = ` · ↑${ahead}`;
-	} else if (behind !== undefined) {
-		badge = ` · ↓${behind}`;
+	if (ahead !== undefined || behind !== undefined) {
+		const sync = document.createElement("span");
+		sync.className = "repo-ahead";
+		const parts: string[] = [];
+		if (ahead !== undefined && ahead > 0) parts.push(`↑${ahead}`);
+		if (behind !== undefined && behind > 0) parts.push(`↓${behind}`);
+		sync.textContent = parts.join(" ");
+		if (sync.textContent) repoInfo.append(sync);
 	}
-	repoInfo.textContent = `${info.branch} · ${info.head.slice(0, 7)} · ${status.entries.length} change(s)${badge}`;
 	// Never re-enable mid-operation: watcher-driven renders fire while a
 	// remote op is in flight (CodeRabbit U0–U8 review). Cancel stays on its
 	// own lifecycle in runRemote.
@@ -185,54 +213,28 @@ function renderRepoInfo(info: RepoInfo, status: GitStatus): void {
 	fetchBtn.disabled = remoteOpRunning;
 }
 
-function renderStatusList(status: GitStatus): void {
-	statusList.innerHTML = "";
-	if (status.entries.length === 0) {
-		const empty = document.createElement("li");
-		empty.textContent = "working tree clean";
-		statusList.appendChild(empty);
-		return;
-	}
-	for (const entry of status.entries) {
-		const item = document.createElement("li");
-		const active =
-			entry.worktreeStatus !== "." ? entry.worktreeStatus : entry.indexStatus;
-		item.dataset.path = entry.path;
-		item.dataset.staged = entry.indexStatus !== "." ? "yes" : "no";
-		const letter = document.createElement("span");
-		// CSS classes can't carry raw porcelain letters (?, ., !) — slug them.
-		letter.className = `status-letter status-${statusSlug(active)}`;
-		letter.textContent = active;
-		const label = document.createElement("span");
-		label.className = "status-path";
-		label.textContent =
-			entry.renamedFrom !== undefined
-				? `${entry.renamedFrom} → ${entry.path}`
-				: entry.path;
-		const action = document.createElement("button");
-		action.type = "button";
-		action.className = "status-action";
-		action.textContent = entry.indexStatus !== "." ? "unstage" : "stage";
-		action.dataset.actionPath = entry.path;
-		action.dataset.actionKind = entry.indexStatus !== "." ? "unstage" : "stage";
-		item.append(letter, label, action);
-		statusList.appendChild(item);
-	}
-}
-
 /** Single render path: every state change paints through here. */
 function render(state: AppState): void {
+	renderWelcome(state.root);
 	if (state.status) {
-		renderStatusList(state.status);
+		renderStatusList(statusList, state.status.entries, {
+			onToggle: (path, unstage, renamedFrom) =>
+				void runWriteAction(path, unstage, renamedFrom),
+			onJump: (path) => diffView?.scrollToFile(path),
+			onToggleAll: (unstage) =>
+				void runBulkWrite(state.status?.entries ?? [], unstage),
+		});
 		tree?.setGitStatus(statusToTreeEntries(state.status.entries));
 	}
 	if (state.info && state.status) renderRepoInfo(state.info, state.status);
 	if (state.status) {
-		const staged = state.status.entries.filter(
-			(e) => e.indexStatus !== ".",
+		const staged = state.status.entries.filter((e) =>
+			isStagedStatus(e.indexStatus),
 		).length;
 		stagedCount.textContent = `${staged} staged`;
 		commitBtn.disabled = staged === 0;
+		const total = state.status.entries.length;
+		changesCount.textContent = total > 0 ? String(total) : "";
 	}
 	for (const button of rangeButtons) {
 		button.classList.toggle(
@@ -240,6 +242,10 @@ function render(state: AppState): void {
 			button.dataset.diffRange === state.diffMode,
 		);
 	}
+	// Keep the range inputs honest: history clicks set the range behind them.
+	if (document.activeElement !== diffFromInput)
+		diffFromInput.value = state.diffFrom;
+	if (document.activeElement !== diffToInput) diffToInput.value = state.diffTo;
 	unifiedBtn.classList.toggle("active", state.diffStyle === "unified");
 	splitBtn.classList.toggle("active", state.diffStyle === "split");
 }
@@ -285,7 +291,12 @@ function diffOptionsFor(state: AppState): GitDiffOptions {
 async function refreshDiff(): Promise<void> {
 	const state = store.get();
 	if (!state.root) return;
-	if (!diffView) diffView = mountDiffView(diffContainer, handleDiffSelection);
+	if (!diffView)
+		diffView = mountDiffView(
+			diffContainer,
+			handleDiffSelection,
+			codeThemeNames(),
+		);
 	const seq = ++diffSeq;
 	// A2: superseded diffs die instead of racing. The previous request is
 	// aborted before the new one starts; the seq guard below stays as the
@@ -337,7 +348,7 @@ function scheduleStatusRefresh(): void {
 	}, REFRESH_DEBOUNCE_MS);
 }
 
-async function openRepo(root: string): Promise<string> {
+async function openRepo(root: string): Promise<void> {
 	const [status, info, paths] = await Promise.all([
 		getPlatform().gitStatus(root),
 		getPlatform().readRepo(root),
@@ -345,7 +356,17 @@ async function openRepo(root: string): Promise<string> {
 	]);
 	if (!tree) tree = mountFileTree(treeContainer);
 	tree.setPaths(paths);
-	if (!diffView) diffView = mountDiffView(diffContainer, handleDiffSelection);
+	treeFilter.value = "";
+	tree.setSearch(null);
+	// Fresh tree views start expanded; the toggle owns the state after.
+	setTreeExpanded(true);
+	applyPierreTheme();
+	if (!diffView)
+		diffView = mountDiffView(
+			diffContainer,
+			handleDiffSelection,
+			codeThemeNames(),
+		);
 
 	// Watcher-driven refresh: one subscription per open repository.
 	if (watcher) await watcher.stop();
@@ -356,7 +377,6 @@ async function openRepo(root: string): Promise<string> {
 	void refreshDiff();
 	refreshBranches();
 	refreshHistory();
-	return `${info.branch} · ${info.head.slice(0, 7)} · ${status.entries.length} change(s)`;
 }
 
 openBtn.addEventListener("click", () => {
@@ -366,11 +386,27 @@ openBtn.addEventListener("click", () => {
 	pullBtn.disabled = true;
 	fetchBtn.disabled = true;
 	openRepo(root)
-		.then((summary) => {
-			repoInfo.textContent = summary;
+		.then(() => {
 			pushBtn.disabled = false;
 			pullBtn.disabled = false;
 			fetchBtn.disabled = false;
+		})
+		.catch((error) => {
+			repoInfo.textContent = `error: ${String(error)}`;
+		});
+});
+
+// Native folder picker (main-process Gtk dialog). Hidden in plain-browser
+// dev: the fake has no dialog and must never learn absolute paths.
+browseBtn.hidden = !isTauri();
+browseBtn.addEventListener("click", () => {
+	void getPlatform()
+		.pickDirectory()
+		.then((picked) => {
+			// Null = the user cancelled — leave the input alone, silently.
+			if (!picked) return;
+			repoInput.value = picked;
+			openBtn.click();
 		})
 		.catch((error) => {
 			repoInfo.textContent = `error: ${String(error)}`;
@@ -388,12 +424,53 @@ const showWriteError = (error: unknown): void => {
 		error instanceof Error ? error.message : String(error);
 };
 
-async function runWriteAction(path: string, unstage: boolean): Promise<void> {
+async function runWriteAction(
+	path: string,
+	unstage: boolean,
+	renamedFrom?: string,
+): Promise<void> {
 	const { root } = store.get();
 	if (!root) return;
+	// Renames travel as both sides: staging or unstaging the destination
+	// alone leaves a half-staged split (verified: restore --staged on the
+	// new path keeps the source deletion staged).
+	const paths = renamedFrom === undefined ? [path] : [renamedFrom, path];
 	try {
-		if (unstage) await getPlatform().unstagePaths(root, [path]);
-		else await getPlatform().stagePaths(root, [path]);
+		if (unstage) await getPlatform().unstagePaths(root, paths);
+		else await getPlatform().stagePaths(root, paths);
+		writeError.textContent = "";
+		await refreshStatus();
+		const { diffMode } = store.get();
+		if (diffMode === "worktree" || diffMode === "staged") await refreshDiff();
+	} catch (error) {
+		showWriteError(error);
+	}
+}
+
+/** Stage-all / Unstage-all: one index write for the whole side. Empty is a
+ * no-op (headers only render for non-empty sides, so this is defensive). */
+async function runBulkWrite(
+	entries: readonly {
+		path: string;
+		indexStatus: string;
+		worktreeStatus: string;
+		renamedFrom?: string;
+	}[],
+	unstage: boolean,
+): Promise<void> {
+	const { root } = store.get();
+	if (!root) return;
+	const paths = entries
+		.filter((e) =>
+			unstage ? isStagedStatus(e.indexStatus) : e.worktreeStatus !== ".",
+		)
+		.flatMap((e) =>
+			e.renamedFrom !== undefined ? [e.path, e.renamedFrom] : [e.path],
+		);
+	if (paths.length === 0) return;
+	try {
+		if (unstage) await getPlatform().unstagePaths(root, paths);
+		else await getPlatform().stagePaths(root, paths);
 		writeError.textContent = "";
 		await refreshStatus();
 		const { diffMode } = store.get();
@@ -429,23 +506,6 @@ for (const [button, style] of [
 		diffView?.setDiffStyle(style);
 	});
 }
-
-// Clicking a changed file jumps the diff to that file's item; the stage/
-// unstage action button writes the index instead.
-statusList.addEventListener("click", (event) => {
-	const target = event.target as HTMLElement | null;
-	const action = target?.closest<HTMLButtonElement>("[data-action-path]");
-	if (action) {
-		void runWriteAction(
-			action.dataset.actionPath ?? "",
-			action.dataset.actionKind === "unstage",
-		);
-		return;
-	}
-	const item = target?.closest("li");
-	const path = item?.dataset.path;
-	if (path) diffView?.scrollToFile(path);
-});
 
 stageSelectedBtn.addEventListener("click", () => {
 	const { root } = store.get();
@@ -486,6 +546,225 @@ commitBtn.addEventListener("click", () => {
 });
 
 renderRecents();
+// Initial paint before any store change: welcome owns the empty state.
+renderWelcome(store.get().root);
+
+// ---- Theme (PRD SHOULD: light/dark + Pierre variants). CodeView follows
+// the page color-scheme via light-dark(); the pool takes variant names that
+// resolve through diffs' theming catalog, and the tree gets themeToTreeStyles
+// on its host container (custom properties inherit into the shadow tree).
+let shellTheme: ShellTheme = { scheme: "dark", variant: "default" };
+
+/** CodeView pool names, falling back to the canonical pair when the
+ * catalog no longer knows a variant (upstream rename resilience). */
+function codeThemeNames(): { light: string; dark: string } {
+	const known = knownThemeNames();
+	const pick = (scheme: "light" | "dark"): string => {
+		const name = pierreThemeName(scheme, shellTheme.variant);
+		return known.includes(name) ? name : `pierre-${scheme}`;
+	};
+	return { light: pick("light"), dark: pick("dark") };
+}
+
+function persistTheme(): void {
+	try {
+		localStorage.setItem(THEME_KEY, JSON.stringify(shellTheme));
+	} catch {
+		// storage unavailable — theme is best-effort
+	}
+}
+
+/** Applies the bundled Pierre theme to the shell chrome and the file tree.
+ * Synchronous: themes are statically imported (static-themes.ts) because the
+ * dynamic resolveTheme path fails to import variant chunks in webview
+ * runtimes (RON-340). Failures still clear stale inline vars so the
+ * [data-theme] stylesheet values take over, and log the reason. */
+let appliedChromeKeys: string[] = [];
+
+function applyPierreTheme(): void {
+	try {
+		const theme = staticTheme(shellTheme.scheme, shellTheme.variant);
+		const tokens = deriveChromeTokens(theme, shellTheme.scheme);
+		appliedChromeKeys = Object.keys(tokens);
+		for (const [key, value] of Object.entries(tokens)) {
+			document.documentElement.style.setProperty(key, value);
+		}
+		tree?.setTheme(themeToTreeStyles(theme));
+	} catch (error) {
+		for (const key of appliedChromeKeys) {
+			document.documentElement.style.removeProperty(key);
+		}
+		appliedChromeKeys = [];
+		console.warn(`[theme] static theme apply failed: ${String(error)}`);
+	}
+}
+
+function applyTheme(next: ShellTheme): void {
+	shellTheme = next;
+	document.documentElement.dataset.theme = next.scheme;
+	themeBtn.textContent = next.scheme === "dark" ? "Light" : "Dark";
+	themeBtn.setAttribute("aria-pressed", String(next.scheme === "light"));
+	themeStyleBtn.textContent = themeVariantLabel(next.variant);
+	themeStyleBtn.title = themeVariantTitle(next.variant);
+	persistTheme();
+	// The worker pool binds theme names at creation: remount the diff view
+	// so the variant takes effect, restoring patch + style after.
+	if (diffView) {
+		const style = store.get().diffStyle;
+		diffView.destroy();
+		diffView = mountDiffView(
+			diffContainer,
+			handleDiffSelection,
+			codeThemeNames(),
+		);
+		if (lastPatch) diffView.setPatch(lastPatch);
+		diffView.setDiffStyle(style);
+	}
+	applyPierreTheme();
+}
+
+{
+	let stored: string | null = null;
+	try {
+		stored = localStorage.getItem(THEME_KEY);
+	} catch {
+		// storage unavailable — fall back to dark
+	}
+	shellTheme = parseStoredTheme(stored);
+	if (stored === null) {
+		try {
+			if (matchMedia("(prefers-color-scheme: light)").matches) {
+				shellTheme = { ...shellTheme, scheme: "light" };
+			}
+		} catch {
+			// matchMedia unavailable — fall back to dark
+		}
+	}
+	applyTheme(shellTheme);
+}
+
+themeBtn.addEventListener("click", () => {
+	applyTheme({
+		...shellTheme,
+		scheme: shellTheme.scheme === "light" ? "dark" : "light",
+	});
+});
+
+themeStyleBtn.addEventListener("click", () => {
+	applyTheme({ ...shellTheme, variant: cycleThemeVariant(shellTheme.variant) });
+});
+
+// ---- Sidebar tabs (Files | Changes | History) ----
+type SidebarTab = "files" | "changes" | "history";
+
+function setTab(tab: SidebarTab): void {
+	for (const button of tabButtons) {
+		button.setAttribute("aria-selected", String(button.dataset.tab === tab));
+	}
+	for (const pane of tabPanes) {
+		pane.hidden = pane.dataset.tabpane !== tab;
+	}
+	try {
+		localStorage.setItem(TAB_KEY, tab);
+	} catch {
+		// storage unavailable — tab is best-effort
+	}
+}
+
+{
+	let initial: SidebarTab = "changes";
+	try {
+		const stored = localStorage.getItem(TAB_KEY);
+		if (stored === "files" || stored === "changes" || stored === "history") {
+			initial = stored;
+		}
+	} catch {
+		// storage unavailable — fall back to changes
+	}
+	setTab(initial);
+}
+
+for (const button of tabButtons) {
+	button.addEventListener("click", () => {
+		const tab = button.dataset.tab;
+		if (tab === "files" || tab === "changes" || tab === "history") {
+			setTab(tab);
+		}
+	});
+}
+
+// ---- Welcome (no repository open yet) ----
+function renderWelcome(root: string): void {
+	const open = root !== "";
+	welcome.hidden = open;
+	diffToolbar.hidden = !open;
+	diffContainer.hidden = !open;
+	// The commit box is dead chrome with no repo (0 staged, disabled
+	// Commit) — the welcome overlay owns the empty state instead.
+	sidebarFooter.hidden = !open;
+	if (open) return;
+	welcomeRecents.innerHTML = "";
+	for (const recent of readRecents().recents) {
+		const item = document.createElement("button");
+		item.type = "button";
+		item.className = "welcome-recent";
+		item.textContent = recent;
+		item.title = recent;
+		item.addEventListener("click", () => {
+			repoInput.value = recent;
+			openBtn.click();
+		});
+		welcomeRecents.append(item);
+	}
+}
+
+welcomeBrowse.addEventListener("click", () => {
+	if (!browseBtn.hidden) browseBtn.click();
+	else {
+		repoInput.focus();
+		repoInfo.textContent = "Type a repository path, then Open.";
+	}
+});
+
+// ---- Tree filter + fold toggle + global shortcuts ----
+// Typing anywhere except a text control: / filters files, 1/2/3 switch tabs.
+treeFilter.addEventListener("input", () => {
+	tree?.setSearch(treeFilter.value.trim() || null);
+});
+
+let treeExpanded = true;
+
+function setTreeExpanded(expanded: boolean): void {
+	treeExpanded = expanded;
+	treeToggleBtn.textContent = expanded ? "Collapse all" : "Expand all";
+	if (expanded) tree?.expandAll();
+	else tree?.collapseAll();
+}
+
+treeToggleBtn.addEventListener("click", () => {
+	setTreeExpanded(!treeExpanded);
+});
+
+document.addEventListener("keydown", (event) => {
+	const target = event.target as HTMLElement | null;
+	const typing =
+		target instanceof HTMLInputElement ||
+		target instanceof HTMLTextAreaElement ||
+		target instanceof HTMLSelectElement ||
+		target?.isContentEditable;
+	if (typing || event.ctrlKey || event.metaKey || event.altKey) return;
+	if (event.key === "/") {
+		event.preventDefault();
+		setTab("files");
+		treeFilter.focus();
+	} else if (event.key === "1") {
+		setTab("files");
+	} else if (event.key === "2") {
+		setTab("changes");
+	} else if (event.key === "3") {
+		setTab("history");
+	}
+});
 
 // ---- U7: push/pull/fetch ----
 let remoteOpRunning = false;
@@ -566,12 +845,16 @@ cancelBtn.addEventListener("click", () => remoteController?.abort());
 const HISTORY_PAGE = 50;
 let historyCommits: LogCommit[] = [];
 let selectedOid: string | null = null;
+// Ctrl-click compare anchor (PRD secondary flow: diff any two commits).
+let compareAnchor: string | null = null;
 let historyScrollQueued = false;
 
 function buildCommitRow(commit: LogCommit): HTMLElement {
-	const item = document.createElement("li");
+	const item = document.createElement("div");
 	item.className = "history-row";
 	item.dataset.oid = commit.oid;
+	item.setAttribute("role", "option");
+	item.setAttribute("aria-selected", "false");
 	const short = document.createElement("span");
 	short.className = "history-oid";
 	short.textContent = commit.shortOid;
@@ -582,7 +865,11 @@ function buildCommitRow(commit: LogCommit): HTMLElement {
 			? `${commit.subject} (${commit.refs})`
 			: commit.subject;
 	item.append(short, subject);
-	item.addEventListener("click", () => viewCommit(commit.oid));
+	item.addEventListener("click", (event) => {
+		if (event.ctrlKey || event.metaKey || event.shiftKey)
+			compareCommits(commit.oid);
+		else viewCommit(commit.oid);
+	});
 	return item;
 }
 
@@ -603,18 +890,31 @@ function renderHistoryWindow(): void {
 		historyList.clientHeight,
 	);
 	historyList.innerHTML = "";
-	if (total === 0) return;
-	const top = document.createElement("li");
+	if (total === 0) {
+		// Fresh repos (unborn HEAD) have no commits; without an open repo
+		// the welcome overlay owns the empty state instead.
+		if (store.get().root) {
+			const empty = document.createElement("div");
+			empty.className = "history-empty";
+			empty.textContent = "No commits yet.";
+			historyList.append(empty);
+		}
+		return;
+	}
+	const top = document.createElement("div");
 	top.className = "history-spacer";
 	top.setAttribute("aria-hidden", "true");
 	top.style.height = `${win.topPad}px`;
 	historyList.append(top);
 	for (let i = win.start; i < win.end; i++) {
 		const row = buildCommitRow(historyCommits[i]);
-		if (historyCommits[i].oid === selectedOid) row.classList.add("selected");
+		const selected = historyCommits[i].oid === selectedOid;
+		if (selected) row.classList.add("selected");
+		row.setAttribute("aria-selected", String(selected));
+		if (historyCommits[i].oid === compareAnchor) row.classList.add("compare");
 		historyList.append(row);
 	}
-	const bottom = document.createElement("li");
+	const bottom = document.createElement("div");
 	bottom.className = "history-spacer";
 	bottom.setAttribute("aria-hidden", "true");
 	bottom.style.height = `${win.bottomPad}px`;
@@ -681,7 +981,7 @@ function refreshHistory(append = false): void {
 			olderBtn.hidden = true;
 			historyCommits = [];
 			renderHistoryWindow();
-			const item = document.createElement("li");
+			const item = document.createElement("div");
 			item.textContent = `error: ${String(error)}`;
 			historyList.append(item);
 		})
@@ -719,6 +1019,7 @@ function refreshBranches(): void {
 
 /** Shows one commit's diff in the diff pane (commit vs its parent). */
 function viewCommit(oid: string): void {
+	compareAnchor = null;
 	store.set({
 		...store.get(),
 		diffMode: "range",
@@ -727,6 +1028,39 @@ function viewCommit(oid: string): void {
 	});
 	void refreshDiff();
 	selectedOid = oid;
+	renderHistoryWindow();
+}
+
+/** Shows the diff between any two history commits (PRD secondary flow).
+ * Click order doesn't matter: the older commit is always `from`. */
+function compareCommits(oid: string): void {
+	if (!compareAnchor || compareAnchor === oid) {
+		compareAnchor = oid;
+		selectedOid = oid;
+		renderHistoryWindow();
+		return;
+	}
+	const anchorIdx = historyCommits.findIndex((c) => c.oid === compareAnchor);
+	const oidIdx = historyCommits.findIndex((c) => c.oid === oid);
+	if (anchorIdx === -1 || oidIdx === -1) {
+		// History reloaded under the anchor (branch switch, pull) — re-anchor.
+		compareAnchor = oidIdx === -1 ? null : oid;
+		selectedOid = compareAnchor;
+		renderHistoryWindow();
+		return;
+	}
+	// History is newest-first: the larger index is the older commit.
+	const [older, newer] =
+		anchorIdx > oidIdx ? [compareAnchor, oid] : [oid, compareAnchor as string];
+	compareAnchor = older;
+	selectedOid = newer;
+	store.set({
+		...store.get(),
+		diffMode: "range",
+		diffFrom: older,
+		diffTo: newer,
+	});
+	void refreshDiff();
 	renderHistoryWindow();
 }
 
@@ -741,7 +1075,10 @@ function afterWorktreeChange(): Promise<void> {
 			if (!root) return;
 			return getPlatform()
 				.gitWorktreePaths(root)
-				.then((paths) => tree?.setPaths(paths));
+				.then((paths) => {
+					tree?.setPaths(paths);
+					setTreeExpanded(true);
+				});
 		})
 		.then(() => {
 			refreshBranches();
@@ -782,126 +1119,32 @@ historyList.addEventListener("scroll", queueHistoryWindowRender, {
 	passive: true,
 });
 
-/** Samples requestAnimationFrame gaps while stepping the diff scroll — a
- * cheap jank proxy for the scroll-smoothness budget. SMOKE-only. */
-function sampleScrollGaps(
-	durationMs: number,
-): Promise<{ maxGap: number; p95Gap: number }> {
-	const gaps: number[] = [];
-	let last = performance.now();
-	const start = last;
-	return new Promise((resolve) => {
-		const step = (now: number) => {
-			gaps.push(now - last);
-			last = now;
-			// Step the scroll; wrap at the bottom to keep frames flowing.
-			diffContainer.scrollTop += Math.max(
-				120,
-				diffContainer.clientHeight * 0.15,
-			);
-			if (
-				diffContainer.scrollTop + diffContainer.clientHeight >=
-				diffContainer.scrollHeight - 1
-			) {
-				diffContainer.scrollTop = 0;
-			}
-			if (now - start >= durationMs) {
-				const sorted = [...gaps].sort((a, b) => a - b);
-				const p95 =
-					sorted[
-						Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))
-					] ?? 0;
-				resolve({ maxGap: sorted[sorted.length - 1] ?? 0, p95Gap: p95 });
-				return;
-			}
-			requestAnimationFrame(step);
-		};
-		requestAnimationFrame(step);
-	});
-}
+// Keyboard-first history (PRD SHOULD): arrows walk commits, Enter's
+// implicit — every step views, like a click.
+historyList.addEventListener("keydown", (event) => {
+	if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+	event.preventDefault();
+	if (historyCommits.length === 0) return;
+	const current = historyCommits.findIndex((c) => c.oid === selectedOid);
+	const next =
+		current === -1
+			? 0
+			: Math.min(
+					historyCommits.length - 1,
+					Math.max(0, current + (event.key === "ArrowDown" ? 1 : -1)),
+				);
+	viewCommit(historyCommits[next].oid);
+	historyList
+		.querySelector(".history-row.selected")
+		?.scrollIntoView({ block: "nearest" });
+});
 
-// ---- SMOKE=1 self-test (driven by the main process over RPC) ----
-window.addEventListener("hmmagainagain:self-test", (event) => {
-	const detail = (
-		event as CustomEvent<{
-			root: string;
-			stage?: boolean;
-			branch?: boolean;
-		}>
-	).detail;
-	const root = detail.root;
-	const run = async (): Promise<{ ok: boolean; detail: string }> => {
-		const loadError = getPlatformLoadError();
-		if (loadError) {
-			return { ok: false, detail: `LOAD ERR: ${loadError}` };
-		}
-		const status = await getPlatform().gitStatus(root);
-		await openRepo(root);
-		// Let the tree render its rows before counting them.
-		await new Promise((resolve) => setTimeout(resolve, 500));
-		const treeRows = tree?.getRowCount() ?? 0;
-		const statusItems = statusList.children.length;
-		// Diff flow + stage timings (RON-297 budget evidence).
-		const diffT0 = performance.now();
-		await refreshDiff();
-		const diffTotalMs = performance.now() - diffT0;
-		// First diff paint, then sample frame gaps while scrolling.
-		await new Promise((resolve) => requestAnimationFrame(resolve));
-		const scroll = await sampleScrollGaps(1500);
-		// SMOKE_STAGE=1: staging/commit flow — fixture repos ONLY.
-		let stageDetail = "stage=off";
-		let stageOk = true;
-		if (detail.stage) {
-			const first = status.entries[0]?.path;
-			if (!first) {
-				stageOk = false;
-				stageDetail = "stage=no-entries";
-			} else {
-				await getPlatform().stagePaths(root, [first]);
-				let st = await getPlatform().gitStatus(root);
-				const stagedOk =
-					(st.entries.find((e) => e.path === first)?.indexStatus ?? ".") !==
-					".";
-				await getPlatform().unstagePaths(root, [first]);
-				st = await getPlatform().gitStatus(root);
-				const unstagedOk =
-					(st.entries.find((e) => e.path === first)?.indexStatus ?? ".") ===
-					".";
-				await getPlatform().stagePaths(root, [first]);
-				await getPlatform().commit(root, "smoke: fixture commit");
-				st = await getPlatform().gitStatus(root);
-				const committedOk = !st.entries.some((e) => e.indexStatus !== ".");
-				stageDetail = `stage staged=${stagedOk} unstaged=${unstagedOk} committed=${committedOk}`;
-				stageOk = stagedOk && unstagedOk && committedOk;
-			}
-		}
-		// SMOKE_BRANCH=1: branch create/switch flow — fixture repos ONLY.
-		let branchDetail = "branch=off";
-		let branchOk = true;
-		if (detail.branch) {
-			const smokeBranch = `u6-smoke-${Date.now()}`;
-			await getPlatform().gitCreateBranch(root, smokeBranch, true);
-			let list = await getPlatform().gitBranches(root);
-			const createdOk = list.find((b) => b.current)?.name === smokeBranch;
-			await getPlatform().gitSwitchBranch(root, "main");
-			list = await getPlatform().gitBranches(root);
-			const switchedOk = list.find((b) => b.current)?.name === "main";
-			branchDetail = `branch created=${createdOk} switchedBack=${switchedOk}`;
-			branchOk = createdOk && switchedOk;
-		}
-		const domOk =
-			treeRows > 0 &&
-			statusItems > 0 &&
-			store.get().root === root &&
-			(status.entries.length === 0 || diffTimings.files > 0) &&
-			(!detail.stage || stageOk) &&
-			(!detail.branch || branchOk);
-		const detailText = `treeRows=${treeRows} statusItems=${statusItems} entries=${status.entries.length} diffFiles=${diffTimings.files} diffTotalMs=${diffTotalMs.toFixed(0)} fetchMs=${diffTimings.fetchMs.toFixed(0)} parseMs=${diffTimings.parseMs.toFixed(0)} scrollMaxGap=${scroll.maxGap.toFixed(1)} scrollP95Gap=${scroll.p95Gap.toFixed(1)} ${stageDetail} ${branchDetail}`;
-		return { ok: domOk, detail: detailText };
-	};
-	void run()
-		.then(({ ok, detail }) => sendSelfTestResult({ ok, detail }))
-		.catch((error) => sendSelfTestResult({ ok: false, detail: String(error) }));
+// Enter submits the two text-box actions (repo open, branch create).
+repoInput.addEventListener("keydown", (event) => {
+	if (event.key === "Enter") openBtn.click();
+});
+branchName.addEventListener("keydown", (event) => {
+	if (event.key === "Enter") branchCreateBtn.click();
 });
 
 interface RecentRepos {

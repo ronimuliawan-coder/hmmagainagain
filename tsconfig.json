@@ -1,5 +1,4 @@
 {
-	"extends": "./.hutch/devkit/tsconfig.json",
 	"compilerOptions": {
 		"target": "ESNext",
 		"module": "ESNext",
@@ -9,6 +8,6 @@
 		"skipLibCheck": true,
 		"forceConsistentCasingInFileNames": true
 	},
-	"include": ["src"],
+	"include": ["src", "tauri/harness"],
 	"exclude": ["node_modules", "dist", "build", "../../package/dist"]
 }

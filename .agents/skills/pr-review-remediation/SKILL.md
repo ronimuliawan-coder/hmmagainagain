@@ -47,7 +47,7 @@ An autonomous, resource-efficient workflow for evaluating, fixing, replying to, 
 ### Phase 1: Wait for Reviewers to Settle (Quiescence Window)
 Query the check suites on the current PR head commit:
 ```bash
-node .agents/skills/pr-review-remediation/scripts/pr_review_tools.js suites <commit_sha>
+node .agents/skills/pr-review-remediation/scripts/pr_review_tools.cjs suites <commit_sha>
 ```
 - If `allCompleted` is `false`, schedule a timer (45–60 seconds) and wait.
 - Proceed only when all automated reviewers have posted their findings for the current commit.
@@ -55,7 +55,7 @@ node .agents/skills/pr-review-remediation/scripts/pr_review_tools.js suites <com
 ### Phase 2: 360-Degree Batch Extraction
 Fetch all review threads, summaries, outside-diff suggestions, and nitpicks across all surfaces:
 ```bash
-node .agents/skills/pr-review-remediation/scripts/pr_review_tools.js fetch <pr_number>
+node .agents/skills/pr-review-remediation/scripts/pr_review_tools.cjs fetch <pr_number>
 ```
 Extract and categorize:
 - **Pending Action Threads** (`pendingActionThreads`): Unresolved threads and threads where the latest comment is a reviewer follow-up/question.
@@ -92,7 +92,7 @@ git push origin <head_branch>
    - For fixes: `"Verified and fixed: <explanation of change>"`
    - For technical rebuttals: `"Technical rebuttal: <evidence-backed explanation>"`
    ```bash
-   node .agents/skills/pr-review-remediation/scripts/pr_review_tools.js reply <pr_number> <comment_id> "<message>"
+   node .agents/skills/pr-review-remediation/scripts/pr_review_tools.cjs reply <pr_number> <comment_id> "<message>"
    ```
 2. **DO NOT resolve review threads**: Leave review threads open so that the original reviewer (e.g. CodeRabbit bot or human reviewer) or Ron can inspect the changes, post follow-ups, and resolve the thread.
 

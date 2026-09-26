@@ -44,6 +44,13 @@ export interface DiffViewHandle {
 	destroy(): void;
 }
 
+export interface CodeThemeNames {
+	light: string;
+	dark: string;
+}
+
+const DEFAULT_THEME_NAMES: CodeThemeNames = { ...THEME };
+
 export function mountDiffView(
 	container: HTMLElement,
 	onSelectionChange?: (selection: {
@@ -51,7 +58,10 @@ export function mountDiffView(
 		start: number;
 		end: number;
 	}) => void,
+	names: CodeThemeNames = DEFAULT_THEME_NAMES,
 ): DiffViewHandle {
+	// Variant theme names (pierre-dark-soft, …) resolve through diffs'
+	// bundled theming catalog — the pool takes names, not objects.
 	const pool = getOrCreateWorkerPoolSingleton({
 		poolOptions: {
 			poolSize: POOL_SIZE,
@@ -62,7 +72,7 @@ export function mountDiffView(
 		},
 		highlighterOptions: {
 			langs: [...HIGHLIGHT_LANGS],
-			theme: { ...THEME },
+			theme: { ...names },
 		},
 	});
 
@@ -86,7 +96,7 @@ export function mountDiffView(
 	};
 	const viewer = new CodeView(
 		{
-			theme: { ...THEME },
+			theme: { ...names },
 			diffStyle: style,
 			stickyHeaders: true,
 			enableLineSelection: true,
@@ -108,7 +118,7 @@ export function mountDiffView(
 		setDiffStyle: (next) => {
 			style = next;
 			viewer.setOptions({
-				theme: { ...THEME },
+				theme: { ...names },
 				diffStyle: style,
 				stickyHeaders: true,
 				enableLineSelection: true,

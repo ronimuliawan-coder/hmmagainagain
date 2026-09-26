@@ -13,7 +13,7 @@ export interface RowWindow {
 }
 
 /** Fallback row height when measurement is unavailable. */
-export const FALLBACK_ROW_HEIGHT = 28;
+export const FALLBACK_ROW_HEIGHT = 24;
 /** Rows rendered beyond the viewport on each side. */
 export const WINDOW_OVERSCAN = 10;
 

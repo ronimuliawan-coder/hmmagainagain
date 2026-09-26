@@ -1,7 +1,7 @@
 // Mapping tests run in bun (pure functions, no DOM).
 
 import { describe, expect, test } from "bun:test";
-import type { StatusEntry } from "../bun/git/status-parser";
+import type { StatusEntry } from "../shared/git/status-parser";
 import { statusToTreeEntries } from "./git-status-mapping";
 
 const entry = (over: Partial<StatusEntry>): StatusEntry => ({

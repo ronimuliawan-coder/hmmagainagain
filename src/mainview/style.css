@@ -2,301 +2,529 @@
 	box-sizing: border-box;
 }
 
+:root {
+	color-scheme: dark;
+	--bg: #14161a;
+	--panel: #1c1f24;
+	--inset: #101215;
+	--border: #2a2e34;
+	--fg: #e6e6e6;
+	--muted: #9aa4ae;
+	--accent: #61afef;
+	--danger: #e06c75;
+	--selected: #232830;
+	--st-m: #e5c07b;
+	--st-a: #98c379;
+	--st-d: #e06c75;
+	--st-rc: #61afef;
+	--st-u: #c678dd;
+	--st-untracked: #7a828e;
+	--st-ignored: #5c6370;
+
+	/* Workbench scale (Elements of Typographic Style: 13px base, 1.25 ratio).
+	   Chrome is quiet on purpose — the patch owns the color. */
+	--fs-base: 13.5px;
+	--fs-list: 12.5px;
+	--fs-small: 11.5px;
+	--lh-body: 1.5;
+	--lh-list: 1.45;
+	--stamp: 24px;
+}
+
+/* Light theme: CodeView follows color-scheme (light-dark()); the shell
+   follows these vars. Status hues are darkened for contrast on light. */
+[data-theme="light"] {
+	color-scheme: light;
+	--bg: #eef0f3;
+	--panel: #ffffff;
+	--inset: #f6f8fa;
+	--border: #d9dee5;
+	--fg: #1c1f24;
+	--muted: #5b6570;
+	--accent: #0969da;
+	--danger: #cf222e;
+	--selected: #e3ecf9;
+	--st-m: #9a6700;
+	--st-a: #1a7f37;
+	--st-d: #cf222e;
+	--st-rc: #0969da;
+	--st-u: #8250df;
+	--st-untracked: #6e7781;
+	--st-ignored: #8c959f;
+}
+
 body {
 	margin: 0;
 	padding: 0;
+	display: flex;
+	flex-direction: column;
+	height: 100vh;
+	font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+	font-size: var(--fs-base);
+	line-height: var(--lh-body);
+	background: var(--bg);
+	color: var(--fg);
+	font-variant-numeric: tabular-nums;
+}
+
+/* Git objects — and only git objects — set in mono: paths, SHAs, stamps.
+   Labels, buttons, and hints stay in sans. */
+code,
+kbd {
 	font-family:
-		-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu,
-		Cantarell, sans-serif;
+		ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, monospace;
 }
 
-#app {
-	min-height: 100vh;
+/* ---- Controls: one flat bench treatment, no cards, no shadows ---- */
+
+button {
+	font: inherit;
+	font-size: var(--fs-list);
+	padding: 4px 12px;
+	border-radius: 6px;
+	border: 1px solid var(--border);
+	background: var(--inset);
+	color: var(--fg);
+	cursor: pointer;
+	transition:
+		border-color 120ms ease,
+		color 120ms ease,
+		background 120ms ease;
 }
 
-main {
-	min-height: 100vh;
-	background: linear-gradient(135deg, #333 0%, #555 100%);
-	padding: 40px 20px;
+button:hover:not(:disabled) {
+	border-color: var(--accent);
 }
 
-.container {
-	max-width: 800px;
-	margin: 0 auto;
+button:disabled {
+	opacity: 0.4;
+	cursor: default;
 }
 
-h1 {
-	color: white;
-	font-size: 3rem;
-	text-align: center;
-	margin-bottom: 8px;
-	text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 1px;
 }
 
-.subtitle {
-	color: rgba(255, 255, 255, 0.9);
-	font-size: 1.25rem;
-	text-align: center;
-	margin-top: 0;
-	margin-bottom: 40px;
-	text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+input,
+select,
+textarea {
+	background: var(--inset);
+	color: inherit;
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	padding: 6px 8px;
+	font: inherit;
+	font-size: var(--fs-list);
 }
 
-.card {
-	background: white;
-	border-radius: 12px;
-	padding: 30px;
-	margin-bottom: 20px;
-	box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
-}
-
-h2 {
-	color: #333;
-	margin-top: 0;
-	margin-bottom: 15px;
-}
-
-p {
-	color: #666;
+textarea {
 	line-height: 1.6;
 }
 
-.button-group {
-	display: flex;
-	gap: 12px;
-	margin-top: 20px;
-}
-
-button {
-	padding: 12px 24px;
-	font-size: 1rem;
-	font-weight: 500;
-	border: none;
-	border-radius: 8px;
-	cursor: pointer;
-	transition: all 0.2s ease;
-}
-
-button.primary {
-	background: #333;
-	color: white;
-	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-}
-
-button.primary:hover {
-	background: #222;
-	transform: translateY(-1px);
-	box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
-}
-
-button.secondary {
-	background: #f0f0f0;
-	color: #666;
-}
-
-button.secondary:hover {
-	background: #e0e0e0;
-}
-
-ul {
-	list-style: none;
-	padding: 0;
-	margin: 0;
-}
-
-li {
-	display: flex;
-	align-items: flex-start;
-	gap: 10px;
-	padding: 10px 0;
-	color: #666;
-}
-
-.number {
-	color: #333;
-	font-weight: bold;
-}
-
-code {
-	background: #f5f5f5;
-	color: #555;
-	padding: 2px 8px;
-	border-radius: 4px;
-	font-family: "Monaco", "Menlo", monospace;
-	font-size: 0.9em;
-}
-
-.stack-grid {
-	display: grid;
-	grid-template-columns: repeat(4, 1fr);
-	gap: 15px;
-}
-
-.stack-item {
-	text-align: center;
-	padding: 20px 10px;
-	background: #fafafa;
-	border-radius: 8px;
-}
-
-.icon {
-	display: block;
-	font-size: 2rem;
-	margin-bottom: 8px;
-}
-
-.footer {
-	text-align: center;
-	color: rgba(255, 255, 255, 0.8);
-	margin-top: 30px;
-	padding: 20px;
-	background: rgba(255, 255, 255, 0.1);
-	border-radius: 8px;
-	backdrop-filter: blur(10px);
-}
-
-.footer p {
-	color: inherit;
-	margin: 0;
-}
-
-.footer code {
-	background: rgba(255, 255, 255, 0.2);
-	color: white;
-}
-
-@media (max-width: 600px) {
-	.stack-grid {
-		grid-template-columns: repeat(2, 1fr);
-	}
-}
-
-/* ---- U3 app shell ---- */
-body {
-	margin: 0;
-	font-family: system-ui, sans-serif;
-	background: #14161a;
-	color: #e6e6e6;
-}
+/* ---- Bench rail (topbar): repo bench left, remote ops right ---- */
 
 #topbar {
 	display: flex;
-	gap: 8px;
+	flex: none;
+	flex-wrap: wrap;
+	gap: 6px 12px;
 	align-items: center;
-	padding: 8px 12px;
-	background: #1c1f24;
-	border-bottom: 1px solid #2a2e34;
+	padding: 6px 12px;
+	background: var(--panel);
+	border-bottom: 1px solid var(--border);
 }
 
 #topbar strong {
-	margin-right: 8px;
+	font-size: var(--fs-base);
+	letter-spacing: -0.01em;
+	white-space: nowrap;
+}
+
+.topbar-group {
+	display: flex;
+	flex: none;
+	gap: 6px;
+	align-items: center;
+	min-width: 0;
+}
+
+#repo-group {
+	flex: 2 1 240px;
 }
 
 #repo-path {
 	flex: 1;
-	min-width: 220px;
-	padding: 6px 8px;
-	border-radius: 6px;
-	border: 1px solid #2a2e34;
-	background: #101215;
-	color: inherit;
+	min-width: 0;
+	font-family:
+		ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, monospace;
+	font-size: var(--fs-list);
 }
 
+/* Structured readout: branch, head, changes, ahead/behind as segments.
+   No dot-joined meta string — each segment is its own element. */
 #repo-info {
-	font-size: 0.85rem;
-	color: #9aa4ae;
+	display: flex;
+	flex: none;
+	gap: 6px;
+	align-items: baseline;
+	max-width: 100%;
+	overflow: hidden;
+	font-size: var(--fs-list);
+	color: var(--muted);
 	white-space: nowrap;
+}
+
+#repo-info .repo-branch {
+	color: var(--fg);
+	font-weight: 650;
+}
+
+#repo-info .repo-head {
+	font-family:
+		ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, monospace;
+	font-size: var(--fs-small);
+}
+
+#repo-info .repo-count {
+	border: 1px solid var(--border);
+	border-radius: 20px;
+	padding: 0 8px;
+	font-size: var(--fs-small);
+}
+
+#repo-info .repo-ahead {
+	font-size: var(--fs-small);
 }
 
 #shell {
 	display: grid;
-	grid-template-columns: minmax(240px, 0.8fr) minmax(240px, 0.8fr) 2fr;
-	height: calc(100vh - 49px);
+	flex: 1;
+	min-height: 0;
+	grid-template-columns: 330px minmax(0, 1fr);
 }
 
-#tree-pane,
-#diff-pane {
-	overflow: auto;
-	padding: 8px 12px;
+#shell > aside,
+#shell > section {
+	min-width: 0;
+	min-height: 0;
 }
 
-#status-pane {
-	display: flex;
-	flex-direction: column;
-	padding: 8px 12px;
-}
-
-#tree-pane {
-	border-right: 1px solid #2a2e34;
-}
-
-/* ---- History pane (A3 windowing: the list is the scroll container and
-   rows are fixed-height so spacer math holds) ---- */
-#history-pane {
+#sidebar {
 	display: flex;
 	flex-direction: column;
 	min-height: 0;
-	padding: 8px 12px;
+	border-right: 1px solid var(--border);
+	background: var(--panel);
 }
 
-#history-list {
+/* Sidebar trays: the active tray reads as a bench surface, not a tab. */
+#sidebar-tabs {
+	display: flex;
+	gap: 2px;
+	padding: 8px 8px 0;
+	border-bottom: 1px solid var(--border);
+}
+
+#sidebar-tabs button {
+	border: 1px solid transparent;
+	border-bottom: none;
+	border-radius: 6px 6px 0 0;
+	background: transparent;
+	color: var(--muted);
+}
+
+#sidebar-tabs button[aria-selected="true"] {
+	color: var(--fg);
+	background: var(--bg);
+	border-color: var(--border);
+	box-shadow: inset 0 2px 0 var(--accent);
+}
+
+#changes-count {
+	font-size: var(--fs-small);
+	border: 1px solid var(--border);
+	border-radius: 20px;
+	padding: 0 7px;
+	margin-left: 4px;
+}
+
+#changes-count:empty {
+	display: none;
+}
+
+[data-tabpane] {
 	flex: 1;
-	overflow-y: auto;
 	min-height: 0;
-	list-style: none;
-	margin: 0;
-	padding: 0;
-	font-family: ui-monospace, monospace;
-	font-size: 0.85rem;
-}
-
-.history-row {
-	height: 28px;
-	line-height: 28px;
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	box-sizing: border-box;
-	cursor: pointer;
-}
-
-.history-row.selected {
-	background: #232830;
-}
-
-.history-spacer {
-	list-style: none;
-}
-
-#status-list {
-	flex: 1;
 	overflow: auto;
+	padding: 10px 12px;
+	display: flex;
+	flex-direction: column;
 }
 
-#commit-box {
-	border-top: 1px solid #2a2e34;
-	padding-top: 8px;
+[data-tabpane][hidden] {
+	display: none;
+}
+
+#sidebar-footer {
+	border-top: 1px solid var(--border);
+	padding: 10px 12px;
 	display: flex;
 	flex-direction: column;
 	gap: 6px;
 }
 
+/* Author display:flex beats the UA [hidden] — same defect class as the
+   diff toolbar leak (RON-329). Both stay hidden until a repo is open. */
+#sidebar-footer[hidden],
+#diff-toolbar[hidden] {
+	display: none;
+}
+
+/* Appearance: an app-scoped preference, deliberately out of the topbar ops
+   rail — a quiet pinned strip at the bottom of the sidebar. */
+#theme-group {
+	border-top: 1px solid var(--border);
+	padding: 6px 12px;
+	display: flex;
+	flex: none;
+	gap: 6px;
+	align-items: center;
+}
+
+#theme-group .appearance-label {
+	margin-right: auto;
+	font-size: var(--fs-small);
+	color: var(--muted);
+}
+
+#theme-btn,
+#theme-style-btn {
+	flex: none;
+}
+
+#tree-container {
+	flex: 1;
+	min-height: 0;
+}
+
+#tree-tools {
+	display: flex;
+	gap: 6px;
+	margin-bottom: 8px;
+}
+
+#tree-filter {
+	flex: 1;
+	min-width: 0;
+	width: auto;
+}
+
+#tree-toggle-btn {
+	flex: none;
+}
+
+/* ---- Welcome: left-aligned bench card, max 60ch ---- */
+
+#welcome {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	justify-content: center;
+	gap: 12px;
+	height: 100%;
+	max-width: 60ch;
+	padding: 24px 32px;
+	text-align: left;
+	margin: 0 auto;
+	width: 100%;
+}
+
+#welcome[hidden] {
+	display: none;
+}
+
+#welcome h2 {
+	margin: 0;
+	font-size: 1.55rem;
+	line-height: 1.2;
+	letter-spacing: -0.02em;
+	font-weight: 700;
+}
+
+#welcome p {
+	margin: 0;
+	color: var(--muted);
+	font-size: 0.92rem;
+	max-width: 52ch;
+}
+
+#welcome-actions {
+	display: flex;
+	gap: 8px;
+}
+
+#welcome-recents {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	width: 100%;
+}
+
+.welcome-recent {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	text-align: left;
+	font-family:
+		ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, monospace;
+	font-size: var(--fs-list);
+}
+
+.history-empty {
+	color: var(--muted);
+	font-size: var(--fs-list);
+	padding: 8px 0;
+}
+
+#status-list li[data-path]:focus-visible,
+.history-row:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: -2px;
+}
+
+#branch-select {
+	margin-bottom: 6px;
+	width: 100%;
+}
+
+#branch-create-row {
+	display: flex;
+	gap: 6px;
+	margin-bottom: 8px;
+}
+
+#branch-create-row input {
+	flex: 1;
+	min-width: 0;
+}
+
+/* History: oid in mono, subject in sans. The type split is the hierarchy —
+   no weight or color tricks on top of it. */
+#history-list {
+	flex: 1;
+	overflow-y: auto;
+	min-height: 0;
+	margin: 0;
+	padding: 0;
+	font-size: var(--fs-list);
+	line-height: var(--lh-list);
+}
+
+.history-row {
+	display: flex;
+	gap: 8px;
+	align-items: baseline;
+	min-height: 26px;
+	padding: 3px 8px;
+	white-space: nowrap;
+	overflow: hidden;
+	box-sizing: border-box;
+	cursor: pointer;
+	border-radius: 4px;
+}
+
+.history-row:hover {
+	background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.history-oid {
+	flex: none;
+	font-family:
+		ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, monospace;
+	font-size: var(--fs-small);
+	color: var(--muted);
+}
+
+.history-subject {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.history-row.selected {
+	background: var(--selected);
+}
+
+.history-row.compare {
+	box-shadow: inset 2px 0 var(--accent);
+}
+
+#history-list:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: -2px;
+}
+
+.pane-hint {
+	margin: 0 0 6px;
+	font-size: var(--fs-small);
+	line-height: 1.5;
+	color: var(--muted);
+	max-width: 60ch;
+}
+
+#status-list {
+	flex: 1;
+	min-height: 0;
+	overflow: auto;
+}
+
+#commit-box {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	background: var(--inset);
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	padding: 8px;
+}
+
 #commit-message {
 	resize: vertical;
-	min-height: 48px;
-	background: #101215;
-	color: inherit;
-	border: 1px solid #2a2e34;
-	border-radius: 6px;
-	padding: 6px 8px;
-	font: inherit;
+	min-height: 52px;
+	background: transparent;
+	border: none;
+	padding: 2px 4px;
+}
+
+#commit-message:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: -1px;
+}
+
+#write-error:empty,
+#remote-progress:empty {
+	display: none;
+}
+
+#remote-progress {
+	white-space: pre-line;
+	color: var(--muted);
+	font-family: ui-monospace, Menlo, monospace;
+	font-size: var(--fs-small);
+	margin: 0;
+	max-height: 80px;
+	overflow: auto;
 }
 
 #write-error {
 	white-space: pre-line;
-	color: #e06c75;
-	font-family: ui-monospace, monospace;
-	font-size: 0.72rem;
+	color: var(--danger);
+	font-family: ui-monospace, Menlo, monospace;
+	font-size: var(--fs-small);
 	margin: 0;
 	max-height: 110px;
 	overflow: auto;
@@ -306,95 +534,90 @@ body {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
+	gap: 8px;
 }
 
 #staged-count {
-	font-size: 0.78rem;
-	color: #9aa4ae;
+	font-size: var(--fs-list);
+	color: var(--muted);
 }
 
-#commit-actions button {
-	padding: 4px 14px;
-	font-size: 0.8rem;
-	border-radius: 5px;
-	border: 1px solid #2a2e34;
-	background: #101215;
-	color: #e6e6e6;
-	cursor: pointer;
+#commit-btn:not(:disabled) {
+	background: var(--accent);
+	border-color: var(--accent);
+	color: var(--inset);
+	font-weight: 650;
 }
 
-#commit-actions button:disabled {
-	opacity: 0.4;
-	cursor: default;
+[data-theme="light"] #commit-btn:not(:disabled) {
+	color: #fff;
 }
 
 .status-action {
 	margin-left: auto;
-	font-size: 0.68rem;
-	padding: 1px 7px;
-	background: #101215;
-	color: #9aa4ae;
-	border: 1px solid #2a2e34;
-	border-radius: 4px;
+	font-size: var(--fs-small);
+	padding: 1px 8px;
+	background: transparent;
+	color: var(--muted);
+	border: 1px solid var(--border);
+	border-radius: 20px;
 	cursor: pointer;
 }
 
 .status-action:hover {
-	color: #e6e6e6;
-	border-color: #61afef;
-}
-
-#diff-toolbar button:disabled {
-	opacity: 0.4;
-	cursor: default;
+	color: var(--fg);
+	border-color: var(--accent);
 }
 
 #diff-pane {
 	display: flex;
 	flex-direction: column;
-	border-left: 1px solid #2a2e34;
+	border-left: 1px solid var(--border);
 	padding: 0;
 }
 
+/* Staging rail: range switch, commit range, and view options. Wraps
+   instead of overflowing — buttons never squash, never overlap. */
 #diff-toolbar {
 	display: flex;
+	flex: none;
+	flex-wrap: wrap;
 	gap: 6px;
 	align-items: center;
-	padding: 6px 10px;
-	background: #1c1f24;
-	border-bottom: 1px solid #2a2e34;
-	font-size: 0.8rem;
+	padding: 8px 12px;
+	background: var(--panel);
+	border-bottom: 1px solid var(--border);
+	font-size: var(--fs-list);
 }
 
 #diff-toolbar button {
-	padding: 3px 10px;
-	font-size: 0.78rem;
-	border-radius: 5px;
-	border: 1px solid #2a2e34;
-	background: #101215;
-	color: #9aa4ae;
-	cursor: pointer;
+	flex: none;
+}
+
+#diff-toolbar button[data-diff-range] {
+	padding: 3px 12px;
+	color: var(--muted);
 }
 
 #diff-toolbar button.active {
-	color: #e6e6e6;
-	border-color: #61afef;
+	color: var(--fg);
+	border-color: var(--accent);
+	background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 #diff-toolbar input {
-	width: 90px;
+	flex: none;
+	width: 96px;
 	padding: 3px 6px;
-	font-size: 0.78rem;
-	border-radius: 5px;
-	border: 1px solid #2a2e34;
-	background: #101215;
-	color: inherit;
+	font-size: var(--fs-list);
+	font-family:
+		ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, monospace;
 }
 
 #diff-info {
 	margin-left: auto;
-	color: #9aa4ae;
-	font-size: 0.78rem;
+	color: var(--muted);
+	font-size: var(--fs-list);
 	white-space: nowrap;
 }
 
@@ -402,62 +625,141 @@ body {
 	flex: 1;
 	min-height: 0;
 	overflow: auto;
-	background: #14161a;
-}
-
-#tree-pane h2,
-#status-pane h2 {
-	font-size: 0.8rem;
-	text-transform: uppercase;
-	letter-spacing: 0.08em;
-	color: #9aa4ae;
-}
-
-#tree-container {
-	height: calc(100% - 32px);
+	background: var(--bg);
 }
 
 #status-list {
 	list-style: none;
 	margin: 0;
 	padding: 0;
-	font-family: ui-monospace, monospace;
-	font-size: 0.85rem;
+	font-size: var(--fs-list);
+	line-height: var(--lh-list);
 }
 
-#status-list li {
+/* Group headers: sentence case, side encoded by rule style —
+   unstaged dashed, staged solid. No uppercase labels. */
+.status-group-header {
 	display: flex;
+	justify-content: space-between;
+	align-items: center;
 	gap: 8px;
-	padding: 3px 0;
-	border-bottom: 1px solid #1c1f24;
+	padding: 10px 2px 4px;
+	border-bottom: 1px dashed var(--border);
 }
 
+li[data-side="staged"].status-group-header,
+.status-group-header:has(+ li[data-side="staged"]) {
+	border-bottom-style: solid;
+}
+
+.status-group-title {
+	font-weight: 650;
+	font-size: var(--fs-list);
+	color: var(--fg);
+}
+
+#status-list li[data-path] {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 4px 6px;
+	cursor: pointer;
+	border-radius: 6px;
+}
+
+#status-list li[data-path]:hover {
+	background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.status-empty {
+	color: var(--muted);
+	font-size: var(--fs-list);
+	padding: 8px 0;
+	max-width: 60ch;
+}
+
+/* The memorable element: oversized single-letter stamps on a washed
+   status tint. Quiet chrome everywhere else lets these carry the pane. */
 .status-letter {
-	display: inline-block;
-	width: 1.4em;
-	font-weight: 700;
-	text-align: center;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: none;
+	width: var(--stamp);
+	height: var(--stamp);
+	border-radius: 4px;
+	font-family:
+		ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, monospace;
+	font-size: 0.95rem;
+	font-weight: 800;
+}
+
+.status-path {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-family:
+		ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, monospace;
+	font-size: var(--fs-list);
+}
+
+.status-check {
+	accent-color: var(--accent);
+	width: 14px;
+	height: 14px;
+	margin: 0;
+	flex: none;
+	cursor: pointer;
 }
 
 .status-m {
-	color: #e5c07b;
+	color: var(--st-m);
+	background: color-mix(in srgb, var(--st-m) 16%, transparent);
 }
 .status-a {
-	color: #98c379;
+	color: var(--st-a);
+	background: color-mix(in srgb, var(--st-a) 16%, transparent);
 }
 .status-d {
-	color: #e06c75;
+	color: var(--st-d);
+	background: color-mix(in srgb, var(--st-d) 16%, transparent);
 }
 .status-r,
 .status-c {
-	color: #61afef;
+	color: var(--st-rc);
+	background: color-mix(in srgb, var(--st-rc) 16%, transparent);
 }
 .status-u {
-	color: #c678dd;
+	color: var(--st-u);
+	background: color-mix(in srgb, var(--st-u) 16%, transparent);
 }
 .status-untracked {
-	color: #7a828e;
+	color: var(--st-untracked);
+	background: color-mix(in srgb, var(--st-untracked) 16%, transparent);
 }
 .status-ignored {
-	color: #5c6370;
+	color: var(--st-ignored);
+	background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	button,
+	#status-list li[data-path],
+	.history-row {
+		transition: none;
+	}
+}
+
+@media (max-width: 760px) {
+	#shell {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	#sidebar {
+		border-right: none;
+		border-bottom: 1px solid var(--border);
+		max-height: 45vh;
+	}
+	#repo-info {
+		display: none;
+	}
 }
