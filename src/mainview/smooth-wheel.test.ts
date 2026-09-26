@@ -159,4 +159,18 @@ describe("enableSmoothWheel", () => {
 		expect(box.scrollTop).toBe(300);
 		box.remove();
 	});
+
+	test("a blocked glide target yields to chaining", async () => {
+		const box = scrollBox();
+		const child = box.firstElementChild as HTMLElement;
+		box.scrollTop = 300;
+		expect(!wheel(child, { deltaY: 100 })).toBe(true);
+		// Second notch while the first glide is in flight: its target (400)
+		// is the edge, so the event stays native instead of re-gliding to
+		// nowhere — while the first glide still lands.
+		expect(!wheel(child, { deltaY: 100 })).toBe(false);
+		await settle();
+		expect(box.scrollTop).toBe(400);
+		box.remove();
+	});
 });

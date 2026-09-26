@@ -34,7 +34,6 @@ const reducedMotion = (): boolean =>
 
 const maxTop = (element: HTMLElement): number =>
 	Math.max(0, element.scrollHeight - element.clientHeight);
-
 function scrollableAncestor(event: Event, delta: number): HTMLElement | null {
 	const path =
 		typeof event.composedPath === "function" ? event.composedPath() : [];
@@ -44,13 +43,17 @@ function scrollableAncestor(event: Event, delta: number): HTMLElement | null {
 	// equality, not .includes: the unannotated ternary's union member
 	// poisons generic method resolution.)
 	const gliding = active?.element;
-	if (gliding) {
-		for (const node of path) {
-			if (node === gliding) return gliding;
-		}
-	}
+	const glidingTo = active?.to;
 	for (const node of path) {
 		if (!(node instanceof HTMLElement)) continue;
+		if (node === gliding && glidingTo !== undefined) {
+			// ...but only while its target can still advance: a blocked
+			// target yields to outer scrollers instead of re-gliding to
+			// nowhere and cancelling the event.
+			const room = delta > 0 ? glidingTo < maxTop(node) : glidingTo > 0;
+			if (room) return node;
+			continue;
+		}
 		if (node.scrollHeight <= node.clientHeight + 1) continue;
 		// Direction matters: an element at its edge still qualifies by size
 		// alone, but gliding it would go nowhere while cancelling the

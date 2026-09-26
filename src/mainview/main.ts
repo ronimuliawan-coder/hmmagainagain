@@ -218,7 +218,8 @@ function render(state: AppState): void {
 	renderWelcome(state.root);
 	if (state.status) {
 		renderStatusList(statusList, state.status.entries, {
-			onToggle: (path, unstage) => void runWriteAction(path, unstage),
+			onToggle: (path, unstage, renamedFrom) =>
+				void runWriteAction(path, unstage, renamedFrom),
 			onJump: (path) => diffView?.scrollToFile(path),
 			onToggleAll: (unstage) =>
 				void runBulkWrite(state.status?.entries ?? [], unstage),
@@ -423,12 +424,20 @@ const showWriteError = (error: unknown): void => {
 		error instanceof Error ? error.message : String(error);
 };
 
-async function runWriteAction(path: string, unstage: boolean): Promise<void> {
+async function runWriteAction(
+	path: string,
+	unstage: boolean,
+	renamedFrom?: string,
+): Promise<void> {
 	const { root } = store.get();
 	if (!root) return;
+	// Renames travel as both sides: staging or unstaging the destination
+	// alone leaves a half-staged split (verified: restore --staged on the
+	// new path keeps the source deletion staged).
+	const paths = renamedFrom === undefined ? [path] : [renamedFrom, path];
 	try {
-		if (unstage) await getPlatform().unstagePaths(root, [path]);
-		else await getPlatform().stagePaths(root, [path]);
+		if (unstage) await getPlatform().unstagePaths(root, paths);
+		else await getPlatform().stagePaths(root, paths);
 		writeError.textContent = "";
 		await refreshStatus();
 		const { diffMode } = store.get();
@@ -445,6 +454,7 @@ async function runBulkWrite(
 		path: string;
 		indexStatus: string;
 		worktreeStatus: string;
+		renamedFrom?: string;
 	}[],
 	unstage: boolean,
 ): Promise<void> {
@@ -454,7 +464,9 @@ async function runBulkWrite(
 		.filter((e) =>
 			unstage ? isStagedStatus(e.indexStatus) : e.worktreeStatus !== ".",
 		)
-		.map((e) => e.path);
+		.flatMap((e) =>
+			e.renamedFrom !== undefined ? [e.path, e.renamedFrom] : [e.path],
+		);
 	if (paths.length === 0) return;
 	try {
 		if (unstage) await getPlatform().unstagePaths(root, paths);

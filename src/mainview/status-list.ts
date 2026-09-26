@@ -33,8 +33,10 @@ export interface StatusListEntry {
 }
 
 export interface StatusListCallbacks {
-	/** Checkbox flipped: stage (unstage=false) or unstage a path. */
-	onToggle: (path: string, unstage: boolean) => void;
+	/** Checkbox flipped: stage (unstage=false) or unstage a path. A rename
+	 * forwards both sides: git needs old+new to stage or unstage the
+	 * rename as one unit, not a half-staged split. */
+	onToggle: (path: string, unstage: boolean, renamedFrom?: string) => void;
 	/** Row body clicked: jump the diff view to the file. */
 	onJump: (path: string) => void;
 	/** Group header button: stage/unstage every path on that side. */
@@ -67,7 +69,7 @@ function buildRow(
 		`${stagedSide ? "Unstage" : "Stage"} ${entry.path}`,
 	);
 	check.addEventListener("change", () => {
-		callbacks.onToggle(entry.path, stagedSide);
+		callbacks.onToggle(entry.path, stagedSide, entry.renamedFrom);
 	});
 
 	const letter = document.createElement("span");

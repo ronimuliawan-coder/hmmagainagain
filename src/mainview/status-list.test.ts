@@ -31,8 +31,10 @@ function render(entries: Parameters<typeof renderStatusList>[1]): {
 	const list = document.createElement("ul");
 	const calls: string[] = [];
 	const callbacks: StatusListCallbacks = {
-		onToggle: (path, unstage) =>
-			calls.push(`toggle:${path}:${unstage ? "unstage" : "stage"}`),
+		onToggle: (path, unstage, renamedFrom) =>
+			calls.push(
+				`toggle:${path}:${unstage ? "unstage" : "stage"}${renamedFrom === undefined ? "" : `:${renamedFrom}`}`,
+			),
 		onJump: (path) => calls.push(`jump:${path}`),
 		onToggleAll: (unstage) =>
 			calls.push(`all:${unstage ? "unstage" : "stage"}`),
@@ -83,6 +85,20 @@ describe("renderStatusList", () => {
 			"Unstaged (2)Stage all",
 			"Staged (1)Unstage all",
 		]);
+	});
+
+	test("rename toggles forward both sides of the rename", () => {
+		const { list, calls } = render([
+			{
+				path: "new.txt",
+				indexStatus: "R",
+				worktreeStatus: ".",
+				renamedFrom: "old.txt",
+			},
+		]);
+		const check = list.querySelector("input.status-check") as HTMLInputElement;
+		check.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+		expect(calls).toEqual(["toggle:new.txt:unstage:old.txt"]);
 	});
 
 	test("checkboxes reflect their side and toggle it", () => {
