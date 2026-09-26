@@ -148,7 +148,9 @@ describe("mountFileTree (component, jsdom)", () => {
 		);
 		expect(row).not.toBeNull();
 		(row as HTMLElement).dispatchEvent(
-			new MouseEvent("click", { bubbles: true }),
+			// Composed, like real user clicks: delegation walks the composed
+			// path because shadow retargeting hides rows from target.
+			new MouseEvent("click", { bubbles: true, composed: true }),
 		);
 		await flushDom();
 		expect(selected).toEqual(["src/index.ts"]);

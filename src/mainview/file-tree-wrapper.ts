@@ -57,18 +57,34 @@ export function mountFileTree(
 			// unsafeCSS shadow seam — the box carries a data attribute, not a
 			// class (upstream style.js targets [data-file-tree-search-*]).
 			unsafeCSS: "[data-file-tree-search-container]{display:none}",
-			// Row clicks jump the diff view (wired by the caller); folders
-			// select too, and the caller ignores what has no diff item.
-			onSelectionChange: (paths) => {
-				const first = paths[0];
-				if (first !== undefined) onSelect?.(first);
-			},
 		});
 		next.render({ containerWrapper: container });
 		next.setGitStatus(cachedStatus);
 		next.setSearch(cachedSearch);
 		return next;
 	};
+	// Row clicks jump the diff view (wired by the caller): native click
+	// delegation on the container, registered once — refolds rebuild the
+	// tree but the container persists, so this must not live in createTree.
+	// Not the component's selection state machine: selection versions and
+	// focus preconditions made the callback path unreliable in the live
+	// app. Rows live in shadow DOM, so outside listeners see a retargeted
+	// target: walk the composed path instead. Folders report too; the
+	// caller ignores what has no diff item.
+	container.addEventListener("click", (event) => {
+		const path =
+			typeof event.composedPath === "function" ? event.composedPath() : [];
+		for (const node of path) {
+			if (
+				node instanceof HTMLElement &&
+				node.dataset.itemPath !== undefined &&
+				node.dataset.itemPath !== ""
+			) {
+				onSelect?.(node.dataset.itemPath);
+				return;
+			}
+		}
+	});
 	let tree = createTree();
 	const refold = (next: "open" | "closed"): void => {
 		if (expansion === next) return;
