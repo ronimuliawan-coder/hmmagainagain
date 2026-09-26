@@ -24,7 +24,10 @@ export interface TreeHandle {
 	destroy(): void;
 }
 
-export function mountFileTree(container: HTMLElement): TreeHandle {
+export function mountFileTree(
+	container: HTMLElement,
+	onSelect?: (path: string) => void,
+): TreeHandle {
 	// resetPaths rebuilds the row projection, so the wrapper replays the
 	// cached inputs around it: expansion first, then decorations + search.
 	let cachedPaths: readonly string[] = [];
@@ -54,6 +57,12 @@ export function mountFileTree(container: HTMLElement): TreeHandle {
 			// unsafeCSS shadow seam — the box carries a data attribute, not a
 			// class (upstream style.js targets [data-file-tree-search-*]).
 			unsafeCSS: "[data-file-tree-search-container]{display:none}",
+			// Row clicks jump the diff view (wired by the caller); folders
+			// select too, and the caller ignores what has no diff item.
+			onSelectionChange: (paths) => {
+				const first = paths[0];
+				if (first !== undefined) onSelect?.(first);
+			},
 		});
 		next.render({ containerWrapper: container });
 		next.setGitStatus(cachedStatus);

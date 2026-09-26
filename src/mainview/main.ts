@@ -184,9 +184,15 @@ function renderRecents(): void {
 
 function renderRepoInfo(info: RepoInfo, status: GitStatus): void {
 	repoInfo.innerHTML = "";
-	const branch = document.createElement("span");
+	const branch = document.createElement("button");
+	branch.type = "button";
 	branch.className = "repo-branch";
 	branch.textContent = info.branch;
+	branch.title = "Switch branch (History)";
+	branch.addEventListener("click", () => {
+		setTab("history");
+		branchSelect.focus();
+	});
 	const head = document.createElement("span");
 	head.className = "repo-head";
 	head.textContent = info.head.slice(0, 7);
@@ -379,7 +385,8 @@ async function openRepo(root: string): Promise<void> {
 		getPlatform().readRepo(root),
 		getPlatform().gitWorktreePaths(root),
 	]);
-	if (!tree) tree = mountFileTree(treeContainer);
+	if (!tree)
+		tree = mountFileTree(treeContainer, (path) => diffView?.scrollToFile(path));
 	tree.setPaths(paths);
 	treeFilter.value = "";
 	tree.setSearch(null);

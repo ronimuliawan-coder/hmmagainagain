@@ -134,6 +134,28 @@ describe("mountFileTree (component, jsdom)", () => {
 		container.remove();
 	});
 
+	test("row click forwards the selected path", async () => {
+		const container = document.createElement("div");
+		document.body.appendChild(container);
+		const selected: string[] = [];
+		const tree = mountFileTree(container, (path) => {
+			selected.push(path);
+		});
+		tree.setPaths(FIXTURE_PATHS);
+		await flushDom();
+		const row = shadowRootOf(container).querySelector(
+			'[data-item-path="src/index.ts"]',
+		);
+		expect(row).not.toBeNull();
+		(row as HTMLElement).dispatchEvent(
+			new MouseEvent("click", { bubbles: true }),
+		);
+		await flushDom();
+		expect(selected).toEqual(["src/index.ts"]);
+		tree.destroy();
+		container.remove();
+	});
+
 	test("setSearch filters rows through the search session", async () => {
 		const { container, tree } = mount();
 		tree.setPaths(FIXTURE_PATHS);
