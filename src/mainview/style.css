@@ -637,6 +637,9 @@ textarea {
 	padding: 0;
 	font-size: var(--fs-list);
 	line-height: var(--lh-list);
+	/* Reserve the scrollbar gutter: overlay scrollbars otherwise slide over
+	 * row ends, covering the bulk button and flickering hover at its edge. */
+	scrollbar-gutter: stable;
 }
 
 /* Group headers: sentence case, side encoded by rule style —

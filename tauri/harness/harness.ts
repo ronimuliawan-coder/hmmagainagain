@@ -108,6 +108,9 @@ export function mountSoundcheckDiff(
 	const viewer = new CodeView(
 		{
 			theme: { light: "pierre-light", dark: "pierre-dark" },
+			// Explicit scheme like the app wrapper: the tokenizer would
+			// otherwise follow the OS media query, not the page toggle.
+			themeType: "dark",
 			diffStyle: "unified",
 			stickyHeaders: false,
 			enableLineSelection: false,
@@ -134,11 +137,20 @@ if (typeof document !== "undefined") {
 			toggle.textContent = scheme === "dark" ? "Light" : "Dark";
 		};
 		mountSoundcheckTree(treeHost);
-		mountSoundcheckDiff(diffHost);
+		const viewer = mountSoundcheckDiff(diffHost);
 		apply();
 		toggle.addEventListener("click", () => {
 			scheme = scheme === "dark" ? "light" : "dark";
 			apply();
+			// setOptions replaces: every key must ride along.
+			viewer.setOptions({
+				theme: { light: "pierre-light", dark: "pierre-dark" },
+				themeType: scheme,
+				diffStyle: "unified",
+				stickyHeaders: false,
+				enableLineSelection: false,
+			});
+			viewer.render(true);
 		});
 	});
 }

@@ -59,6 +59,10 @@ export function mountDiffView(
 		end: number;
 	}) => void,
 	names: CodeThemeNames = DEFAULT_THEME_NAMES,
+	// App color scheme. Passed as themeType because the tokenizer defaults
+	// to the OS media query ("system") — on a dark OS the diff would stay
+	// dark under a light app theme. Stored for setOptions, which replaces.
+	scheme: "light" | "dark" = "dark",
 ): DiffViewHandle {
 	// Variant theme names (pierre-dark-soft, …) resolve through diffs'
 	// bundled theming catalog — the pool takes names, not objects.
@@ -97,6 +101,7 @@ export function mountDiffView(
 	const viewer = new CodeView(
 		{
 			theme: { ...names },
+			themeType: scheme,
 			diffStyle: style,
 			stickyHeaders: true,
 			enableLineSelection: true,
@@ -119,6 +124,7 @@ export function mountDiffView(
 			style = next;
 			viewer.setOptions({
 				theme: { ...names },
+				themeType: scheme,
 				diffStyle: style,
 				stickyHeaders: true,
 				enableLineSelection: true,

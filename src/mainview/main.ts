@@ -296,6 +296,7 @@ async function refreshDiff(): Promise<void> {
 			diffContainer,
 			handleDiffSelection,
 			codeThemeNames(),
+			shellTheme.scheme,
 		);
 	const seq = ++diffSeq;
 	// A2: superseded diffs die instead of racing. The previous request is
@@ -366,6 +367,7 @@ async function openRepo(root: string): Promise<void> {
 			diffContainer,
 			handleDiffSelection,
 			codeThemeNames(),
+			shellTheme.scheme,
 		);
 
 	// Watcher-driven refresh: one subscription per open repository.
@@ -616,6 +618,7 @@ function applyTheme(next: ShellTheme): void {
 			diffContainer,
 			handleDiffSelection,
 			codeThemeNames(),
+			shellTheme.scheme,
 		);
 		if (lastPatch) diffView.setPatch(lastPatch);
 		diffView.setDiffStyle(style);
