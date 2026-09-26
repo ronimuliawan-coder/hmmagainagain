@@ -255,6 +255,8 @@ pub async fn git_worktree_paths(root: String) -> Result<String, String> {
 			"ls-files".to_string(),
 			"-co".to_string(),
 			"--exclude-standard".to_string(),
+			// Unmerged paths would otherwise list once per index stage.
+			"--deduplicate".to_string(),
 			"-z".to_string(),
 		],
 	)
@@ -1175,5 +1177,32 @@ mod tests {
 			key.ends_with(dir.file_name().unwrap().to_str().unwrap()),
 			"{key}"
 		);
+	}
+
+	#[tokio::test]
+	async fn unmerged_paths_list_once() {
+		let dir = fixture();
+		let root = dir.to_str().unwrap().to_string();
+		let git = |args: &[&str]| {
+			git_command()
+				.args(args)
+				.current_dir(&dir)
+				.env("GIT_CONFIG_NOSYSTEM", "1")
+				.output()
+				.unwrap()
+		};
+		// Diverge f.txt on two branches, then merge into conflict: the
+		// path sits unmerged in the index (stages 1-3), which ls-files
+		// would list once per stage without --deduplicate.
+		assert!(git(&["checkout", "-qb", "other"]).status.success());
+		std::fs::write(dir.join("f.txt"), "other\n").unwrap();
+		assert!(git(&["commit", "-qam", "other"]).status.success());
+		assert!(git(&["checkout", "-q", "main"]).status.success());
+		std::fs::write(dir.join("f.txt"), "main\n").unwrap();
+		assert!(git(&["commit", "-qam", "main"]).status.success());
+		assert!(!git(&["merge", "other"]).status.success());
+		let raw = git_worktree_paths(root).await.unwrap();
+		let hits: Vec<&str> = raw.split('\0').filter(|r| *r == "f.txt").collect();
+		assert_eq!(hits.len(), 1, "{raw:?}");
 	}
 }
