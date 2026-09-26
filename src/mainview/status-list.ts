@@ -105,6 +105,10 @@ function buildRow(
 	return item;
 }
 
+// Timestamp of the last pointerdown-driven bulk toggle, module-wide so it
+// survives header rebuilds across re-renders.
+let lastPointerToggle = 0;
+
 function buildGroupHeader(
 	title: string,
 	count: number,
@@ -122,7 +126,17 @@ function buildGroupHeader(
 	action.type = "button";
 	action.className = "status-action";
 	action.textContent = actionLabel;
-	action.addEventListener("click", () => callbacks.onToggleAll(unstage));
+	// Fire on pointerdown, not click: a watcher-driven re-render between
+	// mousedown and mouseup replaces the button and the click never
+	// dispatches (silent no-op; the next attempt works). The click listener
+	// stays as the keyboard path — guarded so mouse users don't double-run.
+	action.addEventListener("pointerdown", () => {
+		lastPointerToggle = Date.now();
+		callbacks.onToggleAll(unstage);
+	});
+	action.addEventListener("click", () => {
+		if (Date.now() - lastPointerToggle > 500) callbacks.onToggleAll(unstage);
+	});
 	header.append(name, action);
 	return header;
 }

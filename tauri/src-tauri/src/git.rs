@@ -545,16 +545,26 @@ pub struct BranchInfo {
 	current: bool,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	upstream: Option<String>,
+	/// Remote-tracking branches (refs/remotes/*) list under their short
+	/// name (origin/main); the UI routes them to the tracking checkout.
+	#[serde(default)]
+	remote: bool,
 }
 
 /// Parses one for-each-ref record (NUL-separated fields).
 pub fn parse_branch_line(line: &str) -> Option<BranchInfo> {
 	let mut fields = line.split('\0');
 	let oid = fields.next()?.to_string();
+	let full = fields.next()?.to_string();
 	let name = fields.next()?.to_string();
 	if name.is_empty() {
 		return None;
 	}
+	// origin/HEAD-style aliases select nothing checkout-able.
+	if name.ends_with("/HEAD") {
+		return None;
+	}
+	let remote = full.starts_with("refs/remotes/");
 	let head = fields.next().unwrap_or("");
 	let upstream = fields.next().unwrap_or("");
 	Some(BranchInfo {
@@ -566,6 +576,7 @@ pub fn parse_branch_line(line: &str) -> Option<BranchInfo> {
 		} else {
 			Some(upstream.to_string())
 		},
+		remote,
 	})
 }
 
@@ -583,8 +594,9 @@ pub async fn git_branches(root: String) -> Result<Vec<BranchInfo>, String> {
 		root,
 		vec![
 			"for-each-ref".to_string(),
-			"--format=%(objectname)%00%(refname:short)%00%(HEAD)%00%(upstream:short)".to_string(),
+			"--format=%(objectname)%00%(refname)%00%(refname:short)%00%(HEAD)%00%(upstream:short)".to_string(),
 			"refs/heads".to_string(),
+			"refs/remotes".to_string(),
 		],
 	)
 	.await?;
@@ -650,6 +662,47 @@ pub async fn git_switch_branch(root: String, name: String) -> Result<(), String>
 	with_write_lock(root.clone(), move || {
 		assert_clean_worktree_sync(&root)?;
 		run_write(&root, &["switch", &name], None)
+	})
+	.await
+}
+
+/// Checks out a remote-tracking branch: a same-named local branch takes a
+/// plain switch, otherwise a tracking branch is created explicitly (no
+/// DWIM guessing on names with slashes).
+#[tauri::command]
+pub async fn git_switch_remote_branch(
+	root: String,
+	remote_ref: String,
+) -> Result<(), String> {
+	reject_empty(&remote_ref, "remote branch")?;
+	let Some((_remote, short)) = remote_ref.split_once('/') else {
+		return Err(format!("not a remote-tracking ref: {remote_ref:?}"));
+	};
+	if short.is_empty() || short.starts_with('-') {
+		return Err(format!("invalid remote-tracking ref: {remote_ref:?}"));
+	}
+	let short = short.to_string();
+	with_write_lock(root.clone(), move || {
+		assert_clean_worktree_sync(&root)?;
+		// Probe, don't guess: rev-parse --quiet reports existence by
+		// status instead of failing loudly (run_git would).
+		let exists = git_command()
+			.args([
+				"rev-parse",
+				"--verify",
+				"--quiet",
+				&format!("refs/heads/{short}"),
+			])
+			.current_dir(&root)
+			.output()
+			.map_err(|e| format!("spawn: {e}"))?
+			.status
+			.success();
+		if exists {
+			run_write(&root, &["switch", &short], None)
+		} else {
+			run_write(&root, &["switch", "--track", "-c", &short, &remote_ref], None)
+		}
 	})
 	.await
 }
@@ -927,15 +980,35 @@ mod tests {
 
 	#[test]
 	fn branch_line_parses_current_and_upstream() {
-		let current =
-			parse_branch_line("abc123\x00main\x00*\x00origin/main").unwrap();
+		let current = parse_branch_line(
+			"abc123\x00refs/heads/main\x00main\x00*\x00origin/main",
+		)
+		.unwrap();
 		assert_eq!(current.name, "main");
 		assert!(current.current);
 		assert_eq!(current.upstream.as_deref(), Some("origin/main"));
-		let other = parse_branch_line("def456\x00side\x00\x00").unwrap();
+		assert!(!current.remote);
+		let other =
+			parse_branch_line("def456\x00refs/heads/side\x00side\x00\x00").unwrap();
 		assert!(!other.current);
 		assert_eq!(other.upstream, None);
-		assert!(parse_branch_line("abc123\x00\x00*\x00").is_none());
+		assert!(!other.remote);
+		assert!(parse_branch_line("abc123\x00refs/heads/\x00\x00\x00").is_none());
+	}
+
+	#[test]
+	fn branch_line_marks_remotes_and_skips_aliases() {
+		let tracked = parse_branch_line(
+			"abc123\x00refs/remotes/origin/main\x00origin/main\x00\x00",
+		)
+		.unwrap();
+		assert_eq!(tracked.name, "origin/main");
+		assert!(tracked.remote);
+		assert!(!tracked.current);
+		assert!(parse_branch_line(
+			"abc123\x00refs/remotes/origin/HEAD\x00origin/HEAD\x00\x00"
+		)
+		.is_none());
 	}
 
 	#[tokio::test]
@@ -1177,6 +1250,90 @@ mod tests {
 			key.ends_with(dir.file_name().unwrap().to_str().unwrap()),
 			"{key}"
 		);
+	}
+
+	#[tokio::test]
+	async fn remote_branches_list_and_check_out() {
+		let dir = fixture();
+		let root = dir.to_str().unwrap().to_string();
+		let git = |args: &[&str]| {
+			git_command()
+				.args(args)
+				.current_dir(&dir)
+				.env("GIT_CONFIG_NOSYSTEM", "1")
+				.output()
+				.unwrap()
+		};
+		let origin = dir.parent().unwrap().join(format!(
+			"tauri-remote-origin-{}",
+			std::time::SystemTime::now()
+				.duration_since(std::time::UNIX_EPOCH)
+				.map(|d| d.as_nanos())
+				.unwrap_or(0)
+		));
+		std::fs::create_dir_all(&origin).unwrap();
+		// NOTE: runs in the ORIGIN dir, not the worktree.
+		assert!(
+			git_command()
+				.args(["init", "--bare", "-q", "-b", "main"])
+				.current_dir(&origin)
+				.env("GIT_CONFIG_NOSYSTEM", "1")
+				.output()
+				.unwrap()
+				.status
+				.success()
+		);
+		assert!(git(&["checkout", "-qb", "feature"]).status.success());
+		std::fs::write(dir.join("g.txt"), "feat\n").unwrap();
+		assert!(git(&["add", "-A"]).status.success());
+		assert!(git(&["commit", "-qm", "feat"]).status.success());
+		assert!(
+			git(&[
+				"remote",
+				"add",
+				"origin",
+				&origin.to_string_lossy()
+			])
+			.status
+			.success()
+		);
+		assert!(git(&["push", "-q", "origin", "main", "feature"]).status.success());
+		assert!(git(&["checkout", "-q", "main"]).status.success());
+
+		let list = git_branches(root.clone()).await.unwrap();
+		let tracked = list
+			.iter()
+			.find(|b| b.name == "origin/feature")
+			.expect("remote-tracking entry listed");
+		assert!(tracked.remote);
+		assert!(!tracked.current);
+
+		// Checkout creates the tracking branch and moves HEAD onto it.
+		git_switch_remote_branch(root.clone(), "origin/feature".to_string())
+			.await
+			.unwrap();
+		let info = read_repo(root.clone()).await.unwrap();
+		assert_eq!(info.branch, "feature");
+
+		// Second time the short name exists: plain switch, same result.
+		git_switch_branch(root.clone(), "main".to_string())
+			.await
+			.unwrap();
+		git_switch_remote_branch(root.clone(), "origin/feature".to_string())
+			.await
+			.unwrap();
+		assert_eq!(read_repo(root.clone()).await.unwrap().branch, "feature");
+
+		// Shapes that are not remote-tracking refs refuse.
+		assert!(git_switch_remote_branch(root.clone(), "main".to_string())
+			.await
+			.is_err());
+		assert!(git_switch_remote_branch(root.clone(), "".to_string())
+			.await
+			.is_err());
+		assert!(git_switch_remote_branch(root.clone(), "-x/y".to_string())
+			.await
+			.is_err());
 	}
 
 	#[tokio::test]

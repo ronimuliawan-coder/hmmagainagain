@@ -87,6 +87,17 @@ describe("fake platform Git simulation", () => {
 		]);
 	});
 
+	test("switch-remote tracks by short name; rejects bare names", async () => {
+		const { platform, fixture } = buildFakeFixture();
+		await platform.gitSwitchRemoteBranch(fixture.repoRoot, "origin/feature");
+		expect(await platform.gitBranches(fixture.repoRoot)).toEqual([
+			{ name: "feature", oid: "f4k3c02", current: true },
+		]);
+		await expect(
+			platform.gitSwitchRemoteBranch(fixture.repoRoot, "main"),
+		).rejects.toThrow(/remote-tracking/);
+	});
+
 	test("stage, unstage, and commit keep index and head state coherent", async () => {
 		const { platform, fixture } = buildFakeFixture();
 		const originalHead = (await platform.gitStatus(fixture.repoRoot)).branch

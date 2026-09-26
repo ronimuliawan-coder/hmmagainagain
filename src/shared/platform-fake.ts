@@ -307,6 +307,20 @@ export function buildFakeFixture() {
 			fakeBranch = name;
 			return Promise.resolve();
 		},
+		gitSwitchRemoteBranch: (root, remoteRef) => {
+			if (root !== FAKE_REPO && !isBigRoot(root)) {
+				return Promise.reject(new Error(`not a git repository: ${root}`));
+			}
+			// Mirrors the native rule loosely: track by short name.
+			const slash = remoteRef.indexOf("/");
+			if (slash < 0 || slash + 1 >= remoteRef.length) {
+				return Promise.reject(
+					new Error(`not a remote-tracking ref: ${remoteRef}`),
+				);
+			}
+			fakeBranch = remoteRef.slice(slash + 1);
+			return Promise.resolve();
+		},
 		gitRemote: (root, op, _options, onLine) => {
 			if (root !== FAKE_REPO && !isBigRoot(root)) {
 				return Promise.reject(new Error(`not a git repository: ${root}`));

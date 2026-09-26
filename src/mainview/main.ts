@@ -296,6 +296,7 @@ async function refreshDiff(): Promise<void> {
 			diffContainer,
 			handleDiffSelection,
 			codeThemeNames(),
+			shellTheme.scheme,
 		);
 	const seq = ++diffSeq;
 	// A2: superseded diffs die instead of racing. The previous request is
@@ -366,6 +367,7 @@ async function openRepo(root: string): Promise<void> {
 			diffContainer,
 			handleDiffSelection,
 			codeThemeNames(),
+			shellTheme.scheme,
 		);
 
 	// Watcher-driven refresh: one subscription per open repository.
@@ -616,6 +618,7 @@ function applyTheme(next: ShellTheme): void {
 			diffContainer,
 			handleDiffSelection,
 			codeThemeNames(),
+			shellTheme.scheme,
 		);
 		if (lastPatch) diffView.setPatch(lastPatch);
 		diffView.setDiffStyle(style);
@@ -1009,6 +1012,7 @@ function refreshBranches(): void {
 				option.value = branch.name;
 				option.textContent = branch.current ? `● ${branch.name}` : branch.name;
 				if (branch.current) option.selected = true;
+				if (branch.remote === true) option.dataset.remote = "true";
 				branchSelect.appendChild(option);
 			}
 		})
@@ -1091,8 +1095,12 @@ branchSelect.addEventListener("change", () => {
 	const { root } = store.get();
 	const name = branchSelect.value;
 	if (!root || !name) return;
-	void getPlatform()
-		.gitSwitchBranch(root, name)
+	const remote = branchSelect.selectedOptions[0]?.dataset.remote === "true";
+	void (
+		remote
+			? getPlatform().gitSwitchRemoteBranch(root, name)
+			: getPlatform().gitSwitchBranch(root, name)
+	)
 		.then(() => afterWorktreeChange())
 		.catch(showWriteError);
 });

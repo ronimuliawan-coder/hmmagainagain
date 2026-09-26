@@ -476,6 +476,29 @@ textarea {
 	max-width: 60ch;
 }
 
+/* Scrollbars: thin, themed, always layout (never overlay). Overlay
+ * scrollbars slide over row ends — covering the bulk button, flickering
+ * its hover at the edge, and intermittently eating its clicks. Styling
+ * them forces classic layout behavior, so content can never slide under. */
+*::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+*::-webkit-scrollbar-track {
+	background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+	background: var(--border);
+	border-radius: 5px;
+	border: 2px solid transparent;
+	background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+	background: var(--muted);
+	border: 2px solid transparent;
+	background-clip: content-box;
+}
+
 #status-list {
 	flex: 1;
 	min-height: 0;
@@ -555,6 +578,9 @@ textarea {
 
 .status-action {
 	margin-left: auto;
+	/* Clear the overlay scrollbar: without this the button slides under it
+	 * while scrolling, which also flickers hover at the boundary. */
+	margin-right: 12px;
 	font-size: var(--fs-small);
 	padding: 1px 8px;
 	background: transparent;
@@ -637,7 +663,8 @@ textarea {
 }
 
 /* Group headers: sentence case, side encoded by rule style —
-   unstaged dashed, staged solid. No uppercase labels. */
+   unstaged dashed, staged solid. No uppercase labels. Sticky so the bulk
+   action stays reachable (and never scrolls under the overlay scrollbar). */
 .status-group-header {
 	display: flex;
 	justify-content: space-between;
@@ -645,6 +672,10 @@ textarea {
 	gap: 8px;
 	padding: 10px 2px 4px;
 	border-bottom: 1px dashed var(--border);
+	position: sticky;
+	top: 0;
+	background: var(--bg);
+	z-index: 1;
 }
 
 li[data-side="staged"].status-group-header,
@@ -704,7 +735,10 @@ li[data-side="staged"].status-group-header,
 }
 
 .status-check {
-	accent-color: var(--accent);
+	/* Monochrome, like the rest of the chrome: the blue accent screamed
+	 * next to the quiet stamps (dogfood). Revert if the checked state
+	 * ever needs more pop. */
+	accent-color: var(--fg);
 	width: 14px;
 	height: 14px;
 	margin: 0;

@@ -13,6 +13,9 @@ export interface BranchInfo {
 	oid: string;
 	current: boolean;
 	upstream?: string;
+	/** Remote-tracking branches (origin/main) list for checkout; absent
+	 * means local. The fake omits it (local-only fixture). */
+	remote?: boolean;
 }
 
 export interface RepoInfo {
@@ -109,6 +112,9 @@ export interface Platform {
 		switchTo?: boolean,
 	): Promise<void>;
 	gitSwitchBranch(root: string, name: string): Promise<void>;
+	/** Checks out a remote-tracking branch (origin/main): same-named local
+	 * branch takes a plain switch, otherwise a tracking branch is created. */
+	gitSwitchRemoteBranch(root: string, remoteRef: string): Promise<void>;
 	/** Fetch/push/pull with streamed progress; system credentials only.
 	 * Aborting `signal` kills the in-flight op (U7b); implementations that
 	 * cannot cancel (fake) ignore it. */
