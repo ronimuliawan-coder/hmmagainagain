@@ -42,6 +42,9 @@ export interface DiffViewHandle {
 	scrollToFile(path: string): void;
 	setDiffStyle(style: DiffStyle): void;
 	destroy(): void;
+	/** DEBUG-ROUND: does a diff item exist for path? Remove with the
+	 * jump-echo below once tree/status jumps are proven in-app. */
+	hasDiffItem(path: string): boolean;
 }
 
 export interface CodeThemeNames {
@@ -120,6 +123,7 @@ export function mountDiffView(
 		scrollToFile: (path) => {
 			viewer.scrollTo({ type: "item", id: `diff:${path}`, align: "start" });
 		},
+		hasDiffItem: (path) => viewer.getItem(`diff:${path}`) !== undefined,
 		setDiffStyle: (next) => {
 			style = next;
 			viewer.setOptions({

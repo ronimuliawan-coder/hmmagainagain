@@ -260,7 +260,13 @@ function render(state: AppState): void {
 			renderStatusList(statusList, state.status.entries, {
 				onToggle: (path, unstage, renamedFrom) =>
 					void runWriteAction(path, unstage, renamedFrom),
-				onJump: (path) => diffView?.scrollToFile(path),
+				onJump: (path) => {
+					// DEBUG-ROUND: echo jump resolution visibly (console is
+					// stripped in release). Remove with hasDiffItem after.
+					const hit = diffView?.hasDiffItem(path) ?? false;
+					writeError.textContent = `jump ${path} → ${hit ? "hit" : "MISS"}`;
+					diffView?.scrollToFile(path);
+				},
 				onToggleAll: (unstage) =>
 					void runBulkWrite(state.status?.entries ?? [], unstage),
 			});
@@ -397,7 +403,12 @@ async function openRepo(root: string): Promise<void> {
 		getPlatform().gitWorktreePaths(root),
 	]);
 	if (!tree)
-		tree = mountFileTree(treeContainer, (path) => diffView?.scrollToFile(path));
+		tree = mountFileTree(treeContainer, (path) => {
+			// DEBUG-ROUND: same echo as status jumps. Remove after.
+			const hit = diffView?.hasDiffItem(path) ?? false;
+			writeError.textContent = `jump ${path} → ${hit ? "hit" : "MISS"}`;
+			diffView?.scrollToFile(path);
+		});
 	tree.setPaths(paths);
 	treeFilter.value = "";
 	tree.setSearch(null);
