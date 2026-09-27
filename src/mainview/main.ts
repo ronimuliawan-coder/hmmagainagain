@@ -184,14 +184,25 @@ function renderRecents(): void {
 
 function renderRepoInfo(info: RepoInfo, status: GitStatus): void {
 	repoInfo.innerHTML = "";
-	const branch = document.createElement("button");
-	branch.type = "button";
+	// Span-as-button (not <button>): WebKitGTK paints native button chrome
+	// (prelight on hover) that no appearance:none reliably kills, which
+	// read as link-blue. Keyboard parity via keydown.
+	const branch = document.createElement("span");
 	branch.className = "repo-branch";
 	branch.textContent = info.branch;
+	branch.tabIndex = 0;
+	branch.setAttribute("role", "button");
 	branch.title = "Switch branch (History)";
-	branch.addEventListener("click", () => {
+	const openHistory = (): void => {
 		setTab("history");
 		branchSelect.focus();
+	};
+	branch.addEventListener("click", openHistory);
+	branch.addEventListener("keydown", (event) => {
+		if (event.key === "Enter" || event.key === " ") {
+			event.preventDefault();
+			openHistory();
+		}
 	});
 	const head = document.createElement("span");
 	head.className = "repo-head";

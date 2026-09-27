@@ -180,28 +180,16 @@ textarea {
 }
 
 #repo-info .repo-branch {
-	/* The pill is the branch switcher (History holds the full control).
-	 * appearance:none kills the native GTK button prelight, which reads
-	 * as link-blue on hover no matter what CSS colors say. */
-	appearance: none;
-	-webkit-appearance: none;
-	background: none;
-	border: none;
-	padding: 0;
-	font: inherit;
 	color: var(--fg);
 	font-weight: 650;
 	cursor: pointer;
 }
 
-#repo-info .repo-branch:hover {
-	/* Pill wash, not a link underline: no layout shift via compensation. */
-	text-decoration: none;
+#repo-info .repo-branch:hover,
+#repo-info .repo-branch:focus-visible {
 	color: var(--fg);
 	background: color-mix(in srgb, var(--accent) 12%, transparent);
 	border-radius: 20px;
-	padding: 0 8px;
-	margin: 0 -8px;
 }
 
 #repo-info .repo-head {
