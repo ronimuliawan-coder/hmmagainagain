@@ -321,6 +321,14 @@ export function buildFakeFixture() {
 			fakeBranch = remoteRef.slice(slash + 1);
 			return Promise.resolve();
 		},
+		readFileText: (root, path) => {
+			if (root !== FAKE_REPO && !isBigRoot(root)) {
+				return Promise.reject(new Error(`not a git repository: ${root}`));
+			}
+			// Synthetic stand-in so the viewer flow is exercisable without
+			// a native backend.
+			return Promise.resolve(`// fixture content for ${path}\nline two\n`);
+		},
 		gitRemote: (root, op, _options, onLine) => {
 			if (root !== FAKE_REPO && !isBigRoot(root)) {
 				return Promise.reject(new Error(`not a git repository: ${root}`));

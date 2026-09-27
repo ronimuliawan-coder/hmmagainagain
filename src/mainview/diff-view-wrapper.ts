@@ -40,6 +40,9 @@ export interface DiffViewHandle {
 	setPatch(patch: string): void;
 	/** Scrolls the given file's diff item into view. */
 	scrollToFile(path: string): void;
+	/** Shows one file's full text, replacing the diff list (file viewer;
+	 * ids are file:-prefixed so they never collide with diff: items). */
+	showFile(path: string, contents: string): void;
 	setDiffStyle(style: DiffStyle): void;
 	destroy(): void;
 }
@@ -116,6 +119,16 @@ export function mountDiffView(
 	return {
 		setPatch: (patch) => {
 			viewer.setItems(patchToItems(patch).items);
+		},
+		showFile: (path, contents) => {
+			viewer.setItems([
+				{
+					id: `file:${path}`,
+					type: "file",
+					file: { name: path, contents },
+					version: 0,
+				},
+			]);
 		},
 		scrollToFile: (path) => {
 			viewer.scrollTo({ type: "item", id: `diff:${path}`, align: "start" });

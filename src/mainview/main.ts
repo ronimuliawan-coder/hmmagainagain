@@ -16,6 +16,7 @@ import { mountFileTree, type TreeHandle } from "./file-tree-wrapper";
 import { statusToTreeEntries } from "./git-status-mapping";
 import { FALLBACK_ROW_HEIGHT, windowRows } from "./history-window";
 import { buildStagedPatch } from "./patch-surgery";
+import { patchToItems } from "./patch-to-items";
 import { getPlatform, isTauri } from "./platform";
 import { enableSmoothWheel } from "./smooth-wheel";
 import { staticTheme } from "./static-themes";
@@ -358,12 +359,11 @@ async function refreshDiff(): Promise<void> {
 		lastPatch = result.patch;
 		lastSelection = null;
 		stageSelectedBtn.disabled = true;
-		diffView.setPatch(result.patch);
+		showDiffResult(result.patch, result.files.length);
 		const parseMs = performance.now() - t1;
 		diffTimings.fetchMs = fetchMs;
 		diffTimings.parseMs = parseMs;
 		diffTimings.files = result.files.length;
-		diffInfo.textContent = `${result.files.length} file(s)`;
 	} catch (error) {
 		// A superseded request's abort is silence, not an error to display.
 		if (controller.signal.aborted) return;
@@ -372,6 +372,70 @@ async function refreshDiff(): Promise<void> {
 			diffTimings.files = 0;
 			diffInfo.textContent = `error: ${String(error)}`;
 		}
+	}
+}
+
+/** Single file view (tree clicks on changeless files): the viewer shows one
+ * file item instead of the diff list. Null = diff list mode. */
+let fileView: { path: string; contents: string } | null = null;
+
+/** Paints a patch, preserving an active file view when it still applies. */
+function showDiffResult(patch: string, count: number): void {
+	if (!diffView) return;
+	const current = fileView;
+	if (current !== null) {
+		if (patchToItems(patch).paths.includes(current.path)) {
+			// The file gained a diff: back to list mode, jumped to it.
+			fileView = null;
+			diffView.setPatch(patch);
+			diffInfo.textContent = `${count} file(s)`;
+			diffView.scrollToFile(current.path);
+		} else {
+			// Still changeless: keep the file view (re-read below).
+			void refreshFileView(current.path);
+			return;
+		}
+	} else {
+		diffView.setPatch(patch);
+		diffInfo.textContent = `${count} file(s)`;
+	}
+}
+
+/** Opens a tree file: jump when it has a diff item, else read its full
+ * text into a single-file view. Read failures surface verbatim. */
+async function openTreeFile(path: string): Promise<void> {
+	const { root } = store.get();
+	if (!root || !diffView) return;
+	if (patchToItems(lastPatch).paths.includes(path)) {
+		fileView = null;
+		diffView.scrollToFile(path);
+		return;
+	}
+	try {
+		const contents = await getPlatform().readFileText(root, path);
+		fileView = { path, contents };
+		diffView.showFile(path, contents);
+		diffInfo.textContent = path;
+	} catch (error) {
+		showWriteError(error);
+	}
+}
+
+/** Re-reads the open file view (watcher ticks must not strand stale text). */
+async function refreshFileView(path: string): Promise<void> {
+	const { root } = store.get();
+	if (!root || !diffView) {
+		fileView = null;
+		return;
+	}
+	try {
+		const contents = await getPlatform().readFileText(root, path);
+		fileView = { path, contents };
+		diffView.showFile(path, contents);
+		diffInfo.textContent = path;
+	} catch {
+		fileView = null;
+		if (diffView) diffView.setPatch(lastPatch);
 	}
 }
 
@@ -397,7 +461,9 @@ async function openRepo(root: string): Promise<void> {
 		getPlatform().gitWorktreePaths(root),
 	]);
 	if (!tree)
-		tree = mountFileTree(treeContainer, (path) => diffView?.scrollToFile(path));
+		tree = mountFileTree(treeContainer, (path) => {
+			void openTreeFile(path);
+		});
 	tree.setPaths(paths);
 	treeFilter.value = "";
 	tree.setSearch(null);
@@ -663,6 +729,7 @@ function applyTheme(next: ShellTheme): void {
 			shellTheme.scheme,
 		);
 		if (lastPatch) diffView.setPatch(lastPatch);
+		if (fileView) diffView.showFile(fileView.path, fileView.contents);
 		diffView.setDiffStyle(style);
 	}
 	applyPierreTheme();
