@@ -182,6 +182,14 @@ textarea {
 #repo-info .repo-branch {
 	color: var(--fg);
 	font-weight: 650;
+	cursor: pointer;
+}
+
+#repo-info .repo-branch:hover,
+#repo-info .repo-branch:focus-visible {
+	color: var(--fg);
+	background: color-mix(in srgb, var(--accent) 12%, transparent);
+	border-radius: 20px;
 }
 
 #repo-info .repo-head {

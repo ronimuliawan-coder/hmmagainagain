@@ -184,9 +184,26 @@ function renderRecents(): void {
 
 function renderRepoInfo(info: RepoInfo, status: GitStatus): void {
 	repoInfo.innerHTML = "";
+	// Span-as-button (not <button>): WebKitGTK paints native button chrome
+	// (prelight on hover) that no appearance:none reliably kills, which
+	// read as link-blue. Keyboard parity via keydown.
 	const branch = document.createElement("span");
 	branch.className = "repo-branch";
 	branch.textContent = info.branch;
+	branch.tabIndex = 0;
+	branch.setAttribute("role", "button");
+	branch.title = "Switch branch (History)";
+	const openHistory = (): void => {
+		setTab("history");
+		branchSelect.focus();
+	};
+	branch.addEventListener("click", openHistory);
+	branch.addEventListener("keydown", (event) => {
+		if (event.key === "Enter" || event.key === " ") {
+			event.preventDefault();
+			openHistory();
+		}
+	});
 	const head = document.createElement("span");
 	head.className = "repo-head";
 	head.textContent = info.head.slice(0, 7);
@@ -379,7 +396,8 @@ async function openRepo(root: string): Promise<void> {
 		getPlatform().readRepo(root),
 		getPlatform().gitWorktreePaths(root),
 	]);
-	if (!tree) tree = mountFileTree(treeContainer);
+	if (!tree)
+		tree = mountFileTree(treeContainer, (path) => diffView?.scrollToFile(path));
 	tree.setPaths(paths);
 	treeFilter.value = "";
 	tree.setSearch(null);
