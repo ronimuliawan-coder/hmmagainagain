@@ -11,6 +11,7 @@ import {
 	type DiffStyle,
 	type DiffViewHandle,
 	mountDiffView,
+	recoverRenderOnInvariant,
 } from "./diff-view-wrapper";
 import { mountFileTree, type TreeHandle } from "./file-tree-wrapper";
 import { statusToTreeEntries } from "./git-status-mapping";
@@ -141,6 +142,13 @@ const diffTimings = { fetchMs: 0, parseMs: 0, files: 0 };
 // the inputs to hunk staging (patch surgery).
 let lastPatch = "";
 let lastSelection: { path: string; start: number; end: number } | null = null;
+
+// Render-race self-heal (upstream race, no API to serialize on): one fresh
+// setPatch per window when the invariant fires. Installed once.
+recoverRenderOnInvariant(
+	() => diffView,
+	() => lastPatch,
+);
 
 function readRecents(): RecentRepos {
 	try {

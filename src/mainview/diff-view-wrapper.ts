@@ -52,6 +52,42 @@ export interface CodeThemeNames {
 	dark: string;
 }
 
+/** Invariant failure the renderer throws when a render pass walks hunk
+ * indices against incompletely tokenized lines (async overlap between
+ * successive renders — upstream #964 mechanism). A fresh setPatch with
+ * the same patch recomputes cleanly, which is exactly the manual action
+ * that clears it in-app. */
+const RENDER_RACE_MESSAGE = "deletionLine and additionLine are null";
+
+/** Installs a narrow self-heal: on the render-race invariant only, redo
+ * the current patch once per window (guarded against loops). Returns an
+ * uninstaller. Upstream owns the real fix; this keeps one poisoned frame
+ * from killing the pane in the meantime. */
+export function recoverRenderOnInvariant(
+	getViewer: () => { setPatch(patch: string): void } | null,
+	getPatch: () => string,
+): () => void {
+	let lastRecovery = 0;
+	const onError = (event: Event): void => {
+		// ErrorEvent in browsers; plain shape keeps this testable without
+		// DOM globals (bun has no ErrorEvent).
+		const message =
+			typeof ErrorEvent !== "undefined" && event instanceof ErrorEvent
+				? event.message
+				: String((event as { message?: unknown }).message ?? event);
+		if (!message.includes(RENDER_RACE_MESSAGE)) return;
+		const now = Date.now();
+		if (now - lastRecovery < 5000) return;
+		lastRecovery = now;
+		console.warn(`[diff] render race detected, re-rendering: ${message}`);
+		const viewer = getViewer();
+		const patch = getPatch();
+		if (viewer && patch) viewer.setPatch(patch);
+	};
+	window.addEventListener("error", onError);
+	return () => window.removeEventListener("error", onError);
+}
+
 const DEFAULT_THEME_NAMES: CodeThemeNames = { ...THEME };
 
 export function mountDiffView(
