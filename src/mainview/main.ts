@@ -84,6 +84,7 @@ const rangeButtons = [
 	),
 ];
 const diffApplyBtn = byId<HTMLButtonElement>("diff-range-apply");
+const fileViewBackBtn = byId<HTMLButtonElement>("fileview-back");
 const diffFromInput = byId<HTMLInputElement>("diff-from");
 const diffToInput = byId<HTMLInputElement>("diff-to");
 const unifiedBtn = byId<HTMLButtonElement>("diff-style-unified");
@@ -379,6 +380,22 @@ async function refreshDiff(): Promise<void> {
  * file item instead of the diff list. Null = diff list mode. */
 let fileView: { path: string; contents: string } | null = null;
 
+/** Paints file-view mode chrome: the way back + what is shown. */
+function paintFileView(): void {
+	fileViewBackBtn.hidden = fileView === null;
+	if (fileView) diffInfo.textContent = fileView.path;
+}
+
+/** Leaves file-view mode, restoring the diff list + count. */
+function exitFileView(): void {
+	fileView = null;
+	if (diffView) {
+		diffView.setPatch(lastPatch);
+		diffInfo.textContent = `${patchToItems(lastPatch).paths.length} file(s)`;
+	}
+	paintFileView();
+}
+
 /** Paints a patch, preserving an active file view when it still applies. */
 function showDiffResult(patch: string, count: number): void {
 	if (!diffView) return;
@@ -386,10 +403,9 @@ function showDiffResult(patch: string, count: number): void {
 	if (current !== null) {
 		if (patchToItems(patch).paths.includes(current.path)) {
 			// The file gained a diff: back to list mode, jumped to it.
-			fileView = null;
-			diffView.setPatch(patch);
-			diffInfo.textContent = `${count} file(s)`;
-			diffView.scrollToFile(current.path);
+			const target = current.path;
+			exitFileView();
+			diffView.scrollToFile(target);
 		} else {
 			// Still changeless: keep the file view (re-read below).
 			void refreshFileView(current.path);
@@ -415,7 +431,7 @@ async function openTreeFile(path: string): Promise<void> {
 		const contents = await getPlatform().readFileText(root, path);
 		fileView = { path, contents };
 		diffView.showFile(path, contents);
-		diffInfo.textContent = path;
+		paintFileView();
 	} catch (error) {
 		showWriteError(error);
 	}
@@ -432,10 +448,9 @@ async function refreshFileView(path: string): Promise<void> {
 		const contents = await getPlatform().readFileText(root, path);
 		fileView = { path, contents };
 		diffView.showFile(path, contents);
-		diffInfo.textContent = path;
+		paintFileView();
 	} catch {
-		fileView = null;
-		if (diffView) diffView.setPatch(lastPatch);
+		exitFileView();
 	}
 }
 
@@ -604,6 +619,10 @@ diffApplyBtn.addEventListener("click", () => {
 		diffFrom: diffFromInput.value.trim(),
 		diffTo: diffToInput.value.trim(),
 	});
+});
+
+fileViewBackBtn.addEventListener("click", () => {
+	exitFileView();
 });
 
 for (const [button, style] of [
@@ -875,6 +894,8 @@ document.addEventListener("keydown", (event) => {
 		setTab("changes");
 	} else if (event.key === "3") {
 		setTab("history");
+	} else if (event.key === "Escape" && fileView) {
+		exitFileView();
 	}
 });
 
