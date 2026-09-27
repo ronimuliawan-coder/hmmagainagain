@@ -40,6 +40,9 @@ export interface DiffViewHandle {
 	setPatch(patch: string): void;
 	/** Scrolls the given file's diff item into view. */
 	scrollToFile(path: string): void;
+	/** Shows one file's full text, replacing the diff list (file viewer;
+	 * ids are file:-prefixed so they never collide with diff: items). */
+	showFile(path: string, contents: string): void;
 	setDiffStyle(style: DiffStyle): void;
 	destroy(): void;
 }
@@ -47,6 +50,42 @@ export interface DiffViewHandle {
 export interface CodeThemeNames {
 	light: string;
 	dark: string;
+}
+
+/** Invariant failure the renderer throws when a render pass walks hunk
+ * indices against incompletely tokenized lines (async overlap between
+ * successive renders — upstream #964 mechanism). A fresh setPatch with
+ * the same patch recomputes cleanly, which is exactly the manual action
+ * that clears it in-app. */
+const RENDER_RACE_MESSAGE = "deletionLine and additionLine are null";
+
+/** Installs a narrow self-heal: on the render-race invariant only, redo
+ * the current patch once per window (guarded against loops). Returns an
+ * uninstaller. Upstream owns the real fix; this keeps one poisoned frame
+ * from killing the pane in the meantime. */
+export function recoverRenderOnInvariant(
+	getViewer: () => { setPatch(patch: string): void } | null,
+	getPatch: () => string,
+): () => void {
+	let lastRecovery = 0;
+	const onError = (event: Event): void => {
+		// ErrorEvent in browsers; plain shape keeps this testable without
+		// DOM globals (bun has no ErrorEvent).
+		const message =
+			typeof ErrorEvent !== "undefined" && event instanceof ErrorEvent
+				? event.message
+				: String((event as { message?: unknown }).message ?? event);
+		if (!message.includes(RENDER_RACE_MESSAGE)) return;
+		const now = Date.now();
+		if (now - lastRecovery < 5000) return;
+		lastRecovery = now;
+		console.warn(`[diff] render race detected, re-rendering: ${message}`);
+		const viewer = getViewer();
+		const patch = getPatch();
+		if (viewer && patch) viewer.setPatch(patch);
+	};
+	window.addEventListener("error", onError);
+	return () => window.removeEventListener("error", onError);
 }
 
 const DEFAULT_THEME_NAMES: CodeThemeNames = { ...THEME };
@@ -116,6 +155,16 @@ export function mountDiffView(
 	return {
 		setPatch: (patch) => {
 			viewer.setItems(patchToItems(patch).items);
+		},
+		showFile: (path, contents) => {
+			viewer.setItems([
+				{
+					id: `file:${path}`,
+					type: "file",
+					file: { name: path, contents },
+					version: 0,
+				},
+			]);
 		},
 		scrollToFile: (path) => {
 			viewer.scrollTo({ type: "item", id: `diff:${path}`, align: "start" });

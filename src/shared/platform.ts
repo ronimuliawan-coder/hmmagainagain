@@ -115,6 +115,9 @@ export interface Platform {
 	/** Checks out a remote-tracking branch (origin/main): same-named local
 	 * branch takes a plain switch, otherwise a tracking branch is created. */
 	gitSwitchRemoteBranch(root: string, remoteRef: string): Promise<void>;
+	/** Reads a worktree file's full text for the file viewer. Root-pinned,
+	 * size-capped, binary-refusing on the native side. */
+	readFileText(root: string, path: string): Promise<string>;
 	/** Fetch/push/pull with streamed progress; system credentials only.
 	 * Aborting `signal` kills the in-flight op (U7b); implementations that
 	 * cannot cancel (fake) ignore it. */

@@ -18,6 +18,7 @@ pub fn run() {
 			git::read_repo,
 			git::git_status,
 			git::git_worktree_paths,
+			git::read_worktree_file,
 			git::git_diff_start,
 			git::git_diff_abort,
 			git::git_diff_result,

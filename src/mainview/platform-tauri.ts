@@ -271,6 +271,8 @@ export function createTauriPlatform(): Platform {
 			invoke<void>("git_switch_remote_branch", { root, remoteRef }).then(
 				() => undefined,
 			),
+		readFileText: (root: string, path: string): Promise<string> =>
+			invoke<string>("read_worktree_file", { root, path }),
 		gitRemote: (
 			root: string,
 			op: "fetch" | "push" | "pull",

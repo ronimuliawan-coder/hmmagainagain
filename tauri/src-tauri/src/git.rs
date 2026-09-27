@@ -247,6 +247,32 @@ pub async fn git_status(root: String) -> Result<String, String> {
 	.await
 }
 
+/// Reads a worktree file's full text for the file viewer. Root-pinned
+/// (canonicalized join must stay under root — the path arrives from UI
+/// clicks, never trusted blindly), size-capped, and binary-refusing.
+#[tauri::command]
+pub async fn read_worktree_file(root: String, path: String) -> Result<String, String> {
+	const MAX_BYTES: u64 = 2 * 1024 * 1024;
+	let base = std::fs::canonicalize(&root).map_err(|e| format!("bad root: {e}"))?;
+	let full = base.join(&path);
+	let resolved = std::fs::canonicalize(&full).map_err(|e| format!("bad path: {e}"))?;
+	if !resolved.starts_with(&base) {
+		return Err("path escapes the repository".to_string());
+	}
+	let meta = std::fs::metadata(&resolved).map_err(|e| format!("stat: {e}"))?;
+	if !meta.is_file() {
+		return Err("not a file".to_string());
+	}
+	if meta.len() > MAX_BYTES {
+		return Err(format!("file too large ({} bytes)", meta.len()));
+	}
+	let bytes = std::fs::read(&resolved).map_err(|e| format!("read: {e}"))?;
+	if bytes.contains(&0) {
+		return Err("binary file".to_string());
+	}
+	String::from_utf8(bytes).map_err(|e| format!("not UTF-8 text: {e}"))
+}
+
 #[tauri::command]
 pub async fn git_worktree_paths(root: String) -> Result<String, String> {
 	run_git_async(
@@ -1250,6 +1276,31 @@ mod tests {
 			key.ends_with(dir.file_name().unwrap().to_str().unwrap()),
 			"{key}"
 		);
+	}
+
+	#[tokio::test]
+	async fn worktree_file_reads_text_and_refuses_the_rest() {
+		let dir = fixture();
+		let root = dir.to_str().unwrap().to_string();
+		std::fs::write(dir.join("note.txt"), "hello\n").unwrap();
+		assert_eq!(
+			read_worktree_file(root.clone(), "note.txt".to_string()).await.unwrap(),
+			"hello\n"
+		);
+		// Traversal, missing, directory, and binary all refuse.
+		assert!(read_worktree_file(root.clone(), "../note.txt".to_string())
+			.await
+			.is_err());
+		assert!(read_worktree_file(root.clone(), "absent.txt".to_string())
+			.await
+			.is_err());
+		assert!(read_worktree_file(root.clone(), "nested".to_string())
+			.await
+			.is_err());
+		std::fs::write(dir.join("blob.bin"), [0x89, b'P', b'N', b'G', 0]).unwrap();
+		assert!(read_worktree_file(root.clone(), "blob.bin".to_string())
+			.await
+			.is_err());
 	}
 
 	#[tokio::test]
